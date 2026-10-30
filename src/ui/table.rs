@@ -29,7 +29,9 @@ pub fn render_issues_table(issues: &[Issue]) -> String {
 
     let mut table = create_styled_table();
     table.set_header(vec![
-        Cell::new("KEY").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        Cell::new("KEY")
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Cyan),
         Cell::new("TYPE").add_attribute(Attribute::Bold),
         Cell::new("SUMMARY").add_attribute(Attribute::Bold),
         Cell::new("STATUS").add_attribute(Attribute::Bold),
@@ -69,7 +71,9 @@ pub fn render_issues_table(issues: &[Issue]) -> String {
             Some("indeterminate") => Color::Yellow,
             Some("new") => Color::Blue,
             _ => {
-                if status_name.eq_ignore_ascii_case("done") || status_name.eq_ignore_ascii_case("closed") {
+                if status_name.eq_ignore_ascii_case("done")
+                    || status_name.eq_ignore_ascii_case("closed")
+                {
                     Color::Green
                 } else if status_name.eq_ignore_ascii_case("in progress") {
                     Color::Yellow
@@ -127,7 +131,9 @@ pub fn render_projects_table(projects: &[Project]) -> String {
 
     let mut table = create_styled_table();
     table.set_header(vec![
-        Cell::new("KEY").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        Cell::new("KEY")
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Cyan),
         Cell::new("NAME").add_attribute(Attribute::Bold),
         Cell::new("TYPE").add_attribute(Attribute::Bold),
         Cell::new("LEAD").add_attribute(Attribute::Bold),
@@ -161,7 +167,9 @@ pub fn render_sprints_table(sprints: &[Sprint]) -> String {
 
     let mut table = create_styled_table();
     table.set_header(vec![
-        Cell::new("ID").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        Cell::new("ID")
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Cyan),
         Cell::new("NAME").add_attribute(Attribute::Bold),
         Cell::new("STATE").add_attribute(Attribute::Bold),
         Cell::new("START DATE").add_attribute(Attribute::Bold),
@@ -199,7 +207,9 @@ pub fn render_boards_table(boards: &[Board]) -> String {
 
     let mut table = create_styled_table();
     table.set_header(vec![
-        Cell::new("ID").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        Cell::new("ID")
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Cyan),
         Cell::new("NAME").add_attribute(Attribute::Bold),
         Cell::new("TYPE").add_attribute(Attribute::Bold),
     ]);
@@ -225,7 +235,9 @@ pub fn render_transitions_table(transitions: &[Transition]) -> String {
 
     let mut table = create_styled_table();
     table.set_header(vec![
-        Cell::new("ID").add_attribute(Attribute::Bold).fg(Color::Cyan),
+        Cell::new("ID")
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Cyan),
         Cell::new("TRANSITION NAME").add_attribute(Attribute::Bold),
         Cell::new("TARGET STATUS").add_attribute(Attribute::Bold),
     ]);

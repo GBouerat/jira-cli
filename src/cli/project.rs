@@ -57,7 +57,11 @@ async fn handle_list(client: &JiraClient, output_mode: OutputMode) -> Result<()>
             println!("| Key | Name | Type | Lead |");
             println!("| --- | --- | --- | --- |");
             for p in &projects {
-                let lead = p.lead.as_ref().map(|u| u.display_name.as_str()).unwrap_or("-");
+                let lead = p
+                    .lead
+                    .as_ref()
+                    .map(|u| u.display_name.as_str())
+                    .unwrap_or("-");
                 let ptype = p.project_type_key.as_deref().unwrap_or("-");
                 println!("| {} | {} | {} | {} |", p.key, p.name, ptype, lead);
             }
@@ -70,7 +74,11 @@ async fn handle_list(client: &JiraClient, output_mode: OutputMode) -> Result<()>
     Ok(())
 }
 
-async fn handle_view(args: ProjectViewArgs, client: &JiraClient, output_mode: OutputMode) -> Result<()> {
+async fn handle_view(
+    args: ProjectViewArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
     let project = client.get_project(&args.key).await?;
 
     match output_mode {
@@ -83,7 +91,11 @@ async fn handle_view(args: ProjectViewArgs, client: &JiraClient, output_mode: Ou
                 println!("Description: {}\n", desc);
             }
             if let Some(lead) = &project.lead {
-                println!("Lead:        {} ({})", lead.display_name.bold(), lead.account_id.dimmed());
+                println!(
+                    "Lead:        {} ({})",
+                    lead.display_name.bold(),
+                    lead.account_id.dimmed()
+                );
             }
             if let Some(ptype) = &project.project_type_key {
                 println!("Type:        {}", ptype);

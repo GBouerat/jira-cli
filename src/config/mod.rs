@@ -7,4 +7,6 @@ pub mod model;
 pub mod resolver;
 
 pub use model::{Config, ConfigOverrides, Profile, ResolvedConfig};
-pub use resolver::{default_config_path, load_config, normalize_instance_url, resolve_credentials, save_config};
+pub use resolver::{
+    default_config_path, load_config, normalize_instance_url, resolve_credentials, save_config,
+};

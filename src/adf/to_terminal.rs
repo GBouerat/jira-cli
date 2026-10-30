@@ -131,7 +131,11 @@ fn render_block(node: &Node, out: &mut String, indent_level: usize, colored: boo
         "rule" => {
             out.push_str(&indent);
             if colored {
-                out.push_str(&"────────────────────────────────────────\n\n".dimmed().to_string());
+                out.push_str(
+                    &"────────────────────────────────────────\n\n"
+                        .dimmed()
+                        .to_string(),
+                );
             } else {
                 out.push_str("----------------------------------------\n\n");
             }
@@ -179,7 +183,13 @@ fn render_block(node: &Node, out: &mut String, indent_level: usize, colored: boo
     }
 }
 
-fn render_list_item(item: &Node, out: &mut String, indent_level: usize, bullet: &str, colored: bool) {
+fn render_list_item(
+    item: &Node,
+    out: &mut String,
+    indent_level: usize,
+    bullet: &str,
+    colored: bool,
+) {
     let indent = "  ".repeat(indent_level);
     out.push_str(&indent);
     if colored {
@@ -223,7 +233,12 @@ fn render_inline(node: &Node, out: &mut String, colored: bool) {
                         "code" => formatted = format!("`{}`", formatted),
                         "strike" => formatted = format!("~~{}~~", formatted),
                         "link" => {
-                            if let Some(href) = mark.attrs.as_ref().and_then(|a| a.get("href")).and_then(|h| h.as_str()) {
+                            if let Some(href) = mark
+                                .attrs
+                                .as_ref()
+                                .and_then(|a| a.get("href"))
+                                .and_then(|h| h.as_str())
+                            {
                                 formatted = format!("[{}]({})", formatted, href);
                             }
                         }
@@ -254,7 +269,11 @@ fn render_inline(node: &Node, out: &mut String, colored: bool) {
                 }
 
                 if let Some(href) = link_href {
-                    out.push_str(&format!("{} ({})", styled.blue().underline(), href.dimmed()));
+                    out.push_str(&format!(
+                        "{} ({})",
+                        styled.blue().underline(),
+                        href.dimmed()
+                    ));
                 } else {
                     out.push_str(&styled.to_string());
                 }

@@ -13,7 +13,8 @@ pub mod sprint;
 use crate::adf::ast::DocNode;
 use crate::client::auth::{build_basic_auth_header, build_user_agent_header};
 use crate::client::issue::{
-    Comment, CommentsResponse, CreatedIssue, Issue, SearchResults, Transition, TransitionsResponse, User, Worklog,
+    Comment, CommentsResponse, CreatedIssue, Issue, SearchResults, Transition, TransitionsResponse,
+    User, Worklog,
 };
 use crate::client::middleware::handle_response_errors;
 use crate::client::project::Project;
@@ -140,7 +141,12 @@ impl JiraClient {
     /// * `jql` - JQL search string (e.g. `project = DEV ORDER BY created DESC`).
     /// * `start_at` - Zero-based offset for pagination.
     /// * `max_results` - Maximum issues to return.
-    pub async fn search_issues(&self, jql: &str, start_at: u32, max_results: u32) -> Result<SearchResults> {
+    pub async fn search_issues(
+        &self,
+        jql: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<SearchResults> {
         let payload = json!({
             "jql": jql,
             "startAt": start_at,

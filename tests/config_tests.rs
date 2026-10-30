@@ -70,5 +70,8 @@ fn test_config_file_permissions_unix() {
 
     let metadata = std::fs::metadata(&path).unwrap();
     let mode = metadata.permissions().mode() & 0o777;
-    assert_eq!(mode, 0o600, "Config file permissions must be 0600 (read/write only for owner)");
+    assert_eq!(
+        mode, 0o600,
+        "Config file permissions must be 0600 (read/write only for owner)"
+    );
 }

@@ -17,7 +17,11 @@ pub fn render_issue_detail(issue: &Issue, instance_url: &str) -> String {
     let mut out = String::new();
 
     // 1. Header Banner
-    let issue_url = format!("{}/browse/{}", instance_url.trim_end_matches('/'), issue.key);
+    let issue_url = format!(
+        "{}/browse/{}",
+        instance_url.trim_end_matches('/'),
+        issue.key
+    );
     out.push_str(&format!(
         "\n{} {}\n",
         issue.key.bold().cyan(),
@@ -99,16 +103,25 @@ pub fn render_issue_detail(issue: &Issue, instance_url: &str) -> String {
     out.push_str("\n\n");
 
     // 3. Description Section (ADF)
-    out.push_str(&format!("{}\n", "─── Description ─────────────────────────".dimmed()));
+    out.push_str(&format!(
+        "{}\n",
+        "─── Description ─────────────────────────".dimmed()
+    ));
     if let Some(desc) = &issue.fields.description {
         if desc.is_empty() {
-            out.push_str(&format!("{}\n\n", "No description provided.".italic().dimmed()));
+            out.push_str(&format!(
+                "{}\n\n",
+                "No description provided.".italic().dimmed()
+            ));
         } else {
             let rendered = adf_to_terminal(desc, true);
             out.push_str(&format!("{}\n\n", rendered));
         }
     } else {
-        out.push_str(&format!("{}\n\n", "No description provided.".italic().dimmed()));
+        out.push_str(&format!(
+            "{}\n\n",
+            "No description provided.".italic().dimmed()
+        ));
     }
 
     // 4. Comments Section (ADF)

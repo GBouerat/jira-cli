@@ -21,9 +21,9 @@ pub const CONFIG_DIR_NAME: &str = "jira-cli";
 /// # Errors
 /// Returns [`JiraError::Config`] if the user's config or home directory cannot be determined.
 pub fn default_config_path() -> Result<PathBuf> {
-    let base = dirs::config_dir()
-        .or_else(dirs::home_dir)
-        .ok_or_else(|| JiraError::Config("Unable to determine user home or config directory".to_string()))?;
+    let base = dirs::config_dir().or_else(dirs::home_dir).ok_or_else(|| {
+        JiraError::Config("Unable to determine user home or config directory".to_string())
+    })?;
     Ok(base.join(CONFIG_DIR_NAME).join(CONFIG_FILE_NAME))
 }
 
@@ -37,7 +37,9 @@ pub fn default_config_path() -> Result<PathBuf> {
 pub fn normalize_instance_url(raw_url: &str) -> Result<String> {
     let trimmed = raw_url.trim().trim_end_matches('/');
     if trimmed.is_empty() {
-        return Err(JiraError::Config("Jira instance URL cannot be empty".to_string()));
+        return Err(JiraError::Config(
+            "Jira instance URL cannot be empty".to_string(),
+        ));
     }
 
     let url_with_scheme = if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
@@ -46,8 +48,9 @@ pub fn normalize_instance_url(raw_url: &str) -> Result<String> {
         trimmed.to_string()
     };
 
-    let parsed = url::Url::parse(&url_with_scheme)
-        .map_err(|e| JiraError::Config(format!("Invalid Jira instance URL '{}': {}", raw_url, e)))?;
+    let parsed = url::Url::parse(&url_with_scheme).map_err(|e| {
+        JiraError::Config(format!("Invalid Jira instance URL '{}': {}", raw_url, e))
+    })?;
 
     if parsed.host_str().is_none() {
         return Err(JiraError::Config(format!(
@@ -79,8 +82,12 @@ pub fn load_config(path: Option<&Path>) -> Result<Config> {
     }
 
     let contents = fs::read_to_string(&target_path).map_err(JiraError::Io)?;
-    let config: Config = serde_json::from_str(&contents)
-        .map_err(|e| JiraError::Config(format!("Failed to parse config file at {:?}: {}", target_path, e)))?;
+    let config: Config = serde_json::from_str(&contents).map_err(|e| {
+        JiraError::Config(format!(
+            "Failed to parse config file at {:?}: {}",
+            target_path, e
+        ))
+    })?;
 
     Ok(config)
 }
@@ -103,8 +110,9 @@ pub fn save_config(config: &Config, path: Option<&Path>) -> Result<PathBuf> {
         fs::create_dir_all(parent).map_err(JiraError::Io)?;
     }
 
-    let serialized = serde_json::to_string_pretty(config)
-        .map_err(|e| JiraError::Config(format!("Failed to serialize configuration to JSON: {}", e)))?;
+    let serialized = serde_json::to_string_pretty(config).map_err(|e| {
+        JiraError::Config(format!("Failed to serialize configuration to JSON: {}", e))
+    })?;
 
     fs::write(&target_path, serialized).map_err(JiraError::Io)?;
 

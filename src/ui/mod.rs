@@ -10,5 +10,6 @@ pub mod table;
 pub use detail::render_issue_detail;
 pub use format::OutputMode;
 pub use table::{
-    render_boards_table, render_issues_table, render_projects_table, render_sprints_table, render_transitions_table,
+    render_boards_table, render_issues_table, render_projects_table, render_sprints_table,
+    render_transitions_table,
 };

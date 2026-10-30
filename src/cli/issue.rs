@@ -195,9 +195,13 @@ pub async fn handle_issue_command(
     default_project: Option<&str>,
 ) -> Result<()> {
     match args.command {
-        IssueSubcommand::List(list_args) => handle_list(list_args, client, output_mode, default_project).await,
+        IssueSubcommand::List(list_args) => {
+            handle_list(list_args, client, output_mode, default_project).await
+        }
         IssueSubcommand::View(view_args) => handle_view(view_args, client, output_mode).await,
-        IssueSubcommand::Create(create_args) => handle_create(create_args, client, default_project).await,
+        IssueSubcommand::Create(create_args) => {
+            handle_create(create_args, client, default_project).await
+        }
         IssueSubcommand::Edit(edit_args) => handle_edit(edit_args, client).await,
         IssueSubcommand::Assign(assign_args) => handle_assign(assign_args, client).await,
         IssueSubcommand::Transition(trans_args) => handle_transition(trans_args, client).await,
@@ -253,12 +257,35 @@ async fn handle_list(
             println!("| --- | --- | --- | --- | --- | --- |");
             for issue in &results.issues {
                 let key = &issue.key;
-                let itype = issue.fields.issuetype.as_ref().map(|t| t.name.as_str()).unwrap_or("-");
+                let itype = issue
+                    .fields
+                    .issuetype
+                    .as_ref()
+                    .map(|t| t.name.as_str())
+                    .unwrap_or("-");
                 let summary = &issue.fields.summary;
-                let status = issue.fields.status.as_ref().map(|s| s.name.as_str()).unwrap_or("-");
-                let priority = issue.fields.priority.as_ref().map(|p| p.name.as_str()).unwrap_or("-");
-                let assignee = issue.fields.assignee.as_ref().map(|u| u.display_name.as_str()).unwrap_or("Unassigned");
-                println!("| {} | {} | {} | {} | {} | {} |", key, itype, summary, status, priority, assignee);
+                let status = issue
+                    .fields
+                    .status
+                    .as_ref()
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("-");
+                let priority = issue
+                    .fields
+                    .priority
+                    .as_ref()
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("-");
+                let assignee = issue
+                    .fields
+                    .assignee
+                    .as_ref()
+                    .map(|u| u.display_name.as_str())
+                    .unwrap_or("Unassigned");
+                println!(
+                    "| {} | {} | {} | {} | {} | {} |",
+                    key, itype, summary, status, priority, assignee
+                );
             }
         }
         OutputMode::Table | OutputMode::Plain => {
@@ -269,7 +296,11 @@ async fn handle_list(
     Ok(())
 }
 
-async fn handle_view(args: IssueViewArgs, client: &JiraClient, output_mode: OutputMode) -> Result<()> {
+async fn handle_view(
+    args: IssueViewArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
     let issue = client.get_issue(&args.key).await?;
 
     match output_mode {
@@ -293,7 +324,10 @@ async fn handle_create(
         .project
         .or_else(|| default_project.map(|p| p.to_string()))
         .ok_or_else(|| {
-            JiraError::Config("Project key must be specified via --project or default_project in config".to_string())
+            JiraError::Config(
+                "Project key must be specified via --project or default_project in config"
+                    .to_string(),
+            )
         })?;
 
     let issue_type = args.issue_type.unwrap_or_else(|| "Task".to_string());
@@ -370,9 +404,9 @@ async fn handle_assign(args: IssueAssignArgs, client: &JiraClient) -> Result<()>
         me.account_id
     } else {
         let users = client.find_users(&target_user).await?;
-        let user = users.first().ok_or_else(|| {
-            JiraError::Generic(format!("User '{}' not found", target_user))
-        })?;
+        let user = users
+            .first()
+            .ok_or_else(|| JiraError::Generic(format!("User '{}' not found", target_user)))?;
         user.account_id.clone()
     };
 
@@ -394,7 +428,10 @@ async fn handle_transition(args: IssueTransitionArgs, client: &JiraClient) -> Re
         None => {
             println!("Available transitions for {}:\n", args.key.cyan());
             println!("{}", render_transitions_table(&transitions));
-            println!("\nAdvance status with: {}", format!("jira issue transition {} <NAME_OR_ID>", args.key).yellow());
+            println!(
+                "\nAdvance status with: {}",
+                format!("jira issue transition {} <NAME_OR_ID>", args.key).yellow()
+            );
         }
         Some(target) => {
             let matched = transitions.iter().find(|t| {
@@ -407,7 +444,9 @@ async fn handle_transition(args: IssueTransitionArgs, client: &JiraClient) -> Re
             })?;
 
             let comment_doc = args.comment.as_deref().map(text_to_adf);
-            client.do_transition(&args.key, &matched.id, comment_doc.as_ref()).await?;
+            client
+                .do_transition(&args.key, &matched.id, comment_doc.as_ref())
+                .await?;
 
             println!(
                 "{} Transitioned {} to status '{}'",
@@ -430,7 +469,11 @@ async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<(
             } else {
                 println!("Comments for {}:\n", args.key.cyan());
                 for comment in &comments.comments {
-                    let author = comment.author.as_ref().map(|u| u.display_name.as_str()).unwrap_or("Anonymous");
+                    let author = comment
+                        .author
+                        .as_ref()
+                        .map(|u| u.display_name.as_str())
+                        .unwrap_or("Anonymous");
                     let created = comment.created.as_deref().unwrap_or("");
                     println!("{} {}", author.bold().blue(), created.dimmed());
                     if let Some(body) = &comment.body {
@@ -442,7 +485,11 @@ async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<(
         Some(msg) => {
             let adf_body = text_to_adf(&msg);
             client.add_comment(&args.key, &adf_body).await?;
-            println!("{} Added comment to {}", "✔".green().bold(), args.key.cyan());
+            println!(
+                "{} Added comment to {}",
+                "✔".green().bold(),
+                args.key.cyan()
+            );
         }
     }
 
@@ -451,7 +498,9 @@ async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<(
 
 async fn handle_worklog(args: IssueWorklogArgs, client: &JiraClient) -> Result<()> {
     let comment_doc = args.comment.as_deref().map(text_to_adf);
-    let worklog = client.add_worklog(&args.key, &args.time, comment_doc.as_ref()).await?;
+    let worklog = client
+        .add_worklog(&args.key, &args.time, comment_doc.as_ref())
+        .await?;
 
     println!(
         "{} Logged {} on issue {}",

@@ -23,12 +23,16 @@ async fn test_mock_myself_endpoint() {
     Mock::given(method("GET"))
         .and(path("/rest/api/3/myself"))
         .and(header("Accept", "application/json"))
-        .and(header("Authorization", "Basic dXNlckBleGFtcGxlLmNvbTp0b2tlbjEyMw=="))
+        .and(header(
+            "Authorization",
+            "Basic dXNlckBleGFtcGxlLmNvbTp0b2tlbjEyMw==",
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
         .mount(&mock_server)
         .await;
 
-    let client = JiraClient::from_credentials(&mock_server.uri(), "user@example.com", "token123").unwrap();
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "user@example.com", "token123").unwrap();
     let user = client.myself().await.expect("failed to call myself");
 
     assert_eq!(user.account_id, "acc-12345");
@@ -72,7 +76,8 @@ async fn test_mock_search_issues() {
         .mount(&mock_server)
         .await;
 
-    let client = JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
     let results = client
         .search_issues("project = DEV", 0, 50)
         .await
@@ -81,7 +86,10 @@ async fn test_mock_search_issues() {
     assert_eq!(results.total, 1);
     assert_eq!(results.issues.len(), 1);
     assert_eq!(results.issues[0].key, "DEV-101");
-    assert_eq!(results.issues[0].fields.summary, "Fix async worker deadlock");
+    assert_eq!(
+        results.issues[0].fields.summary,
+        "Fix async worker deadlock"
+    );
 }
 
 #[tokio::test]
@@ -121,7 +129,8 @@ async fn test_mock_get_issue_with_adf() {
         .mount(&mock_server)
         .await;
 
-    let client = JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
     let issue = client.get_issue("DEV-202").await.expect("get issue failed");
 
     assert_eq!(issue.key, "DEV-202");
@@ -150,11 +159,19 @@ async fn test_mock_create_issue() {
         .mount(&mock_server)
         .await;
 
-    let client = JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
     let desc = DocNode::new(vec![Node::paragraph(vec![Node::text("New task details")])]);
 
     let created = client
-        .create_issue("DEV", "Task", "New issue summary", Some(&desc), Some("High"), None)
+        .create_issue(
+            "DEV",
+            "Task",
+            "New issue summary",
+            Some(&desc),
+            Some("High"),
+            None,
+        )
         .await
         .expect("create issue failed");
 
@@ -176,11 +193,17 @@ async fn test_mock_rate_limiting_429() {
         .mount(&mock_server)
         .await;
 
-    let client = JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
-    let err = client.myself().await.expect_err("expected rate limit error");
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    let err = client
+        .myself()
+        .await
+        .expect_err("expected rate limit error");
 
     match err {
-        JiraError::RateLimited { retry_after_seconds } => {
+        JiraError::RateLimited {
+            retry_after_seconds,
+        } => {
             assert_eq!(retry_after_seconds, 15);
         }
         other => panic!("Expected JiraError::RateLimited, got {:?}", other),
@@ -204,7 +227,8 @@ async fn test_mock_api_error_response() {
         .mount(&mock_server)
         .await;
 
-    let client = JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
     let err = client
         .edit_issue("DEV-999", Some(""), None, None)
         .await

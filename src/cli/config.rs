@@ -6,7 +6,9 @@
 
 use crate::client::JiraClient;
 use crate::config::model::Profile;
-use crate::config::resolver::{default_config_path, load_config, normalize_instance_url, save_config};
+use crate::config::resolver::{
+    default_config_path, load_config, normalize_instance_url, save_config,
+};
 use crate::error::{JiraError, Result};
 use clap::{Args, Subcommand};
 use colored::Colorize;
@@ -181,7 +183,10 @@ fn handle_list(config_path: Option<&PathBuf>) -> Result<()> {
     println!("Config file: {}\n", path.display().to_string().dimmed());
 
     if config.profiles.is_empty() {
-        println!("No profiles configured yet. Run {} to get started.", "jira config init".yellow());
+        println!(
+            "No profiles configured yet. Run {} to get started.",
+            "jira config init".yellow()
+        );
         return Ok(());
     }
 
@@ -227,7 +232,11 @@ fn handle_use(args: ConfigUseArgs, config_path: Option<&PathBuf>) -> Result<()> 
     config.default_profile = target.to_string();
     save_config(&config, config_path.map(|p| p.as_path()))?;
 
-    println!("{} Active profile set to '{}'", "✔".green().bold(), target.cyan());
+    println!(
+        "{} Active profile set to '{}'",
+        "✔".green().bold(),
+        target.cyan()
+    );
     Ok(())
 }
 
@@ -237,12 +246,23 @@ async fn handle_test(client_factory: impl FnOnce() -> Result<JiraClient>) -> Res
 
     let user = client.myself().await?;
     println!("\n{} Authentication successful!", "✔".green().bold());
-    println!("  User:        {} ({})", user.display_name.bold(), user.account_id.dimmed());
+    println!(
+        "  User:        {} ({})",
+        user.display_name.bold(),
+        user.account_id.dimmed()
+    );
     if let Some(email) = &user.email_address {
         println!("  Email:       {}", email);
     }
     println!("  Instance:    {}", client.instance_url());
-    println!("  Status:      {}", if user.active { "Active".green() } else { "Inactive".red() });
+    println!(
+        "  Status:      {}",
+        if user.active {
+            "Active".green()
+        } else {
+            "Inactive".red()
+        }
+    );
 
     Ok(())
 }

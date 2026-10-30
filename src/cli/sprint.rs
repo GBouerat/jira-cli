@@ -56,13 +56,21 @@ pub async fn handle_sprint_command(
 ) -> Result<()> {
     match args.command {
         SprintSubcommand::List(list_args) => handle_list(list_args, client, output_mode).await,
-        SprintSubcommand::Issues(issues_args) => handle_issues(issues_args, client, output_mode).await,
+        SprintSubcommand::Issues(issues_args) => {
+            handle_issues(issues_args, client, output_mode).await
+        }
         SprintSubcommand::Boards => handle_boards(client, output_mode).await,
     }
 }
 
-async fn handle_list(args: SprintListArgs, client: &JiraClient, output_mode: OutputMode) -> Result<()> {
-    let sprints = client.list_sprints(args.board, args.state.as_deref()).await?;
+async fn handle_list(
+    args: SprintListArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let sprints = client
+        .list_sprints(args.board, args.state.as_deref())
+        .await?;
 
     match output_mode {
         OutputMode::Json => {
@@ -74,7 +82,10 @@ async fn handle_list(args: SprintListArgs, client: &JiraClient, output_mode: Out
             for s in &sprints {
                 let start = s.start_date.as_deref().unwrap_or("-");
                 let end = s.end_date.as_deref().unwrap_or("-");
-                println!("| {} | {} | {} | {} | {} |", s.id, s.name, s.state, start, end);
+                println!(
+                    "| {} | {} | {} | {} | {} |",
+                    s.id, s.name, s.state, start, end
+                );
             }
         }
         OutputMode::Table | OutputMode::Plain => {
@@ -85,7 +96,11 @@ async fn handle_list(args: SprintListArgs, client: &JiraClient, output_mode: Out
     Ok(())
 }
 
-async fn handle_issues(args: SprintIssuesArgs, client: &JiraClient, output_mode: OutputMode) -> Result<()> {
+async fn handle_issues(
+    args: SprintIssuesArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
     let results = client.list_sprint_issues(args.id).await?;
 
     match output_mode {

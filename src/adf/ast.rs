@@ -43,10 +43,13 @@ impl DocNode {
     /// Checks if the document contains no child nodes or only empty text nodes.
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
-            || self
-                .content
-                .iter()
-                .all(|n| n.content.is_empty() && n.text.as_ref().map_or(true, |t| t.trim().is_empty()))
+            || self.content.iter().all(|n| {
+                n.content.is_empty()
+                    && match &n.text {
+                        Some(t) => t.trim().is_empty(),
+                        None => true,
+                    }
+            })
     }
 }
 

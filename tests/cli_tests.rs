@@ -10,7 +10,9 @@ fn test_cli_version_metadata() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")))
-        .stdout(predicate::str::contains("https://github.com/GBouerat/jira-cli"));
+        .stdout(predicate::str::contains(
+            "https://github.com/GBouerat/jira-cli",
+        ));
 }
 
 #[test]
@@ -20,7 +22,9 @@ fn test_cli_help_metadata() {
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("jira"))
-        .stdout(predicate::str::contains("https://github.com/GBouerat/jira-cli"));
+        .stdout(predicate::str::contains(
+            "https://github.com/GBouerat/jira-cli",
+        ));
 }
 
 #[test]

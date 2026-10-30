@@ -97,7 +97,8 @@ mod tests {
         assert!(json_str.contains("\"default_profile\": \"default\""));
         assert!(json_str.contains("\"instance_url\": \"https://example.atlassian.net\""));
 
-        let deserialized: Config = serde_json::from_str(&json_str).expect("failed to deserialize json");
+        let deserialized: Config =
+            serde_json::from_str(&json_str).expect("failed to deserialize json");
         assert_eq!(config, deserialized);
     }
 }

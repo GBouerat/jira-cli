@@ -7,7 +7,8 @@ use clap::{CommandFactory, Parser};
 use colored::Colorize;
 use jira_cli::cli::args::{Cli, Commands};
 use jira_cli::cli::{
-    handle_config_command, handle_issue_command, handle_project_command, handle_sprint_command, run_completions,
+    handle_config_command, handle_issue_command, handle_project_command, handle_sprint_command,
+    run_completions,
 };
 use jira_cli::client::JiraClient;
 use jira_cli::config::{load_config, resolve_credentials};

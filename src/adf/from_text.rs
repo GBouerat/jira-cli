@@ -139,7 +139,7 @@ fn is_bullet_item(s: &str) -> bool {
 }
 
 fn extract_bullet_text(s: &str) -> &str {
-    &s[2..].trim()
+    s[2..].trim()
 }
 
 fn is_ordered_item(s: &str) -> bool {
@@ -150,7 +150,7 @@ fn is_ordered_item(s: &str) -> bool {
 
 fn extract_ordered_text(s: &str) -> &str {
     let dot_idx = s.find(". ").unwrap_or(0);
-    &s[dot_idx + 2..].trim()
+    s[dot_idx + 2..].trim()
 }
 
 /// Parses inline formatting marks (`**bold**`, `*italic*`, `` `code` ``, `[text](url)`).
