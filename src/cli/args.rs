@@ -48,7 +48,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub email: Option<String>,
 
-    /// Explicit API token override.
+    /// Explicit API token override (note: visible in process table; prefer JIRA_API_TOKEN env var).
     #[arg(long, global = true)]
     pub token: Option<String>,
 

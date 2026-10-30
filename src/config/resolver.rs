@@ -7,9 +7,6 @@ use crate::error::{JiraError, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 /// Name of the primary configuration file.
 pub const CONFIG_FILE_NAME: &str = "config.json";
 
@@ -114,12 +111,27 @@ pub fn save_config(config: &Config, path: Option<&Path>) -> Result<PathBuf> {
         JiraError::Config(format!("Failed to serialize configuration to JSON: {}", e))
     })?;
 
-    fs::write(&target_path, serialized).map_err(JiraError::Io)?;
-
     #[cfg(unix)]
     {
-        let permissions = fs::Permissions::from_mode(0o600);
-        let _ = fs::set_permissions(&target_path, permissions);
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&target_path)
+            .map_err(JiraError::Io)?;
+
+        file.write_all(serialized.as_bytes())
+            .map_err(JiraError::Io)?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        fs::write(&target_path, serialized).map_err(JiraError::Io)?;
     }
 
     Ok(target_path)

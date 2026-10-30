@@ -100,10 +100,29 @@ impl JiraClient {
             .header(reqwest::header::ACCEPT, "application/json")
     }
 
-    /// Executes an HTTP request, checks for API errors and rate limits, and returns the raw response.
+    /// Executes an HTTP request, checks for API errors and rate limits, retrying once on brief rate limits (<= 5s).
     async fn execute(&self, req: RequestBuilder) -> Result<Response> {
+        let cloned_req = req.try_clone();
         let resp = req.send().await.map_err(JiraError::Network)?;
-        handle_response_errors(resp).await
+
+        match handle_response_errors(resp).await {
+            Ok(r) => Ok(r),
+            Err(JiraError::RateLimited {
+                retry_after_seconds,
+            }) => {
+                if retry_after_seconds <= 5 {
+                    if let Some(retry_builder) = cloned_req {
+                        tokio::time::sleep(Duration::from_secs(retry_after_seconds)).await;
+                        let retry_resp = retry_builder.send().await.map_err(JiraError::Network)?;
+                        return handle_response_errors(retry_resp).await;
+                    }
+                }
+                Err(JiraError::RateLimited {
+                    retry_after_seconds,
+                })
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Executes an HTTP request and deserializes the JSON body into type `T`.
@@ -174,7 +193,8 @@ impl JiraClient {
 
     /// Fetches detailed issue information by key or ID.
     pub async fn get_issue(&self, issue_key: &str) -> Result<Issue> {
-        let endpoint = format!("/rest/api/3/issue/{}", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
         let req = self.request(Method::GET, &endpoint).query(&[(
             "fields",
             "summary,status,issuetype,priority,assignee,reporter,created,updated,description,comment,labels",
@@ -245,8 +265,9 @@ impl JiraClient {
             return Ok(());
         }
 
+        let clean_key = issue_key.trim().to_uppercase();
         let payload = json!({ "fields": fields });
-        let endpoint = format!("/rest/api/3/issue/{}", issue_key.trim());
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
         let req = self
             .request(Method::PUT, &endpoint)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -258,7 +279,8 @@ impl JiraClient {
 
     /// Assigns an issue to a user by Atlassian account ID (or unassigns if `None`).
     pub async fn assign_issue(&self, issue_key: &str, account_id: Option<&str>) -> Result<()> {
-        let endpoint = format!("/rest/api/3/issue/{}/assignee", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/assignee", clean_key);
         let payload = json!({ "accountId": account_id });
 
         let req = self
@@ -272,7 +294,8 @@ impl JiraClient {
 
     /// Fetches all available workflow transitions for an issue.
     pub async fn get_transitions(&self, issue_key: &str) -> Result<Vec<Transition>> {
-        let endpoint = format!("/rest/api/3/issue/{}/transitions", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/transitions", clean_key);
         let req = self.request(Method::GET, &endpoint);
         let resp: TransitionsResponse = self.execute_json(req).await?;
         Ok(resp.transitions)
@@ -297,7 +320,8 @@ impl JiraClient {
             });
         }
 
-        let endpoint = format!("/rest/api/3/issue/{}/transitions", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/transitions", clean_key);
         let req = self
             .request(Method::POST, &endpoint)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -309,14 +333,16 @@ impl JiraClient {
 
     /// Fetches comments for an issue.
     pub async fn get_comments(&self, issue_key: &str) -> Result<CommentsResponse> {
-        let endpoint = format!("/rest/api/3/issue/{}/comment", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/comment", clean_key);
         let req = self.request(Method::GET, &endpoint);
         self.execute_json(req).await
     }
 
     /// Adds a new comment to an issue in Atlassian Document Format.
     pub async fn add_comment(&self, issue_key: &str, body: &DocNode) -> Result<Comment> {
-        let endpoint = format!("/rest/api/3/issue/{}/comment", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/comment", clean_key);
         let payload = json!({ "body": body });
 
         let req = self
@@ -334,7 +360,8 @@ impl JiraClient {
         time_spent: &str,
         comment: Option<&DocNode>,
     ) -> Result<Worklog> {
-        let endpoint = format!("/rest/api/3/issue/{}/worklog", issue_key.trim());
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/worklog", clean_key);
         let mut payload = json!({ "timeSpent": time_spent });
 
         if let Some(c) = comment {

@@ -180,7 +180,7 @@ async fn test_mock_create_issue() {
 }
 
 #[tokio::test]
-async fn test_mock_rate_limiting_429() {
+async fn test_mock_rate_limiting_long_returns_error() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -208,6 +208,69 @@ async fn test_mock_rate_limiting_429() {
         }
         other => panic!("Expected JiraError::RateLimited, got {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn test_mock_rate_limiting_short_retry_succeeds() {
+    let mock_server = MockServer::start().await;
+
+    // First request: returns 429 with Retry-After: 1
+    // Second request: succeeds with 200 OK
+    let user_json = serde_json::json!({
+        "accountId": "acc-999",
+        "displayName": "Retried User",
+        "active": true
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", "1")
+                .set_body_string("Rate limit burst"),
+        )
+        .up_to_n_times(1)
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/myself"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(user_json))
+        .mount(&mock_server)
+        .await;
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    let user = client.myself().await.expect("retry should succeed");
+    assert_eq!(user.account_id, "acc-999");
+}
+
+#[tokio::test]
+async fn test_mock_issue_key_case_normalization() {
+    let mock_server = MockServer::start().await;
+
+    let issue_json = serde_json::json!({
+        "id": "500",
+        "key": "DEV-500",
+        "fields": {
+            "summary": "Case normalization test"
+        }
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/DEV-500"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(issue_json))
+        .mount(&mock_server)
+        .await;
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    // Pass lowercase "dev-500" with whitespace - client should normalize to "DEV-500"
+    let issue = client
+        .get_issue("  dev-500  ")
+        .await
+        .expect("normalization should match DEV-500");
+    assert_eq!(issue.key, "DEV-500");
 }
 
 #[tokio::test]

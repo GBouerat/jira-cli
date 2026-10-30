@@ -13,7 +13,7 @@ use crate::adf::ast::{DocNode, Mark, Node};
 pub fn text_to_adf(input: &str) -> DocNode {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return DocNode::new(vec![Node::paragraph(vec![Node::text("")])]);
+        return DocNode::new(vec![Node::paragraph(Vec::new())]);
     }
 
     let mut blocks: Vec<Node> = Vec::new();
@@ -128,7 +128,7 @@ pub fn text_to_adf(input: &str) -> DocNode {
     }
 
     if blocks.is_empty() {
-        blocks.push(Node::paragraph(vec![Node::text("")]));
+        blocks.push(Node::paragraph(Vec::new()));
     }
 
     DocNode::new(blocks)
@@ -153,10 +153,10 @@ fn extract_ordered_text(s: &str) -> &str {
     s[dot_idx + 2..].trim()
 }
 
-/// Parses inline formatting marks (`**bold**`, `*italic*`, `` `code` ``, `[text](url)`).
+/// Parses inline formatting marks (`**bold**`, `__bold__`, `*italic*`, `_italic_`, `~~strike~~`, `` `code` ``, `[text](url)`).
 pub fn parse_inline(text: &str) -> Vec<Node> {
     if text.is_empty() {
-        return vec![Node::text("")];
+        return Vec::new();
     }
 
     let mut nodes: Vec<Node> = Vec::new();
@@ -164,6 +164,31 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
     let mut current_buf = String::new();
 
     while let Some(c) = chars.next() {
+        // Strikethrough: ~~text~~
+        if c == '~' && chars.peek() == Some(&'~') {
+            chars.next(); // consume second '~'
+            let mut strike_buf = String::new();
+            let mut closed = false;
+            while let Some(next_c) = chars.next() {
+                if next_c == '~' && chars.peek() == Some(&'~') {
+                    chars.next();
+                    closed = true;
+                    break;
+                }
+                strike_buf.push(next_c);
+            }
+            if closed {
+                if !current_buf.is_empty() {
+                    nodes.push(Node::text(std::mem::take(&mut current_buf)));
+                }
+                nodes.push(Node::text_with_marks(strike_buf, vec![Mark::strike()]));
+            } else {
+                current_buf.push_str("~~");
+                current_buf.push_str(&strike_buf);
+            }
+            continue;
+        }
+
         // Inline code: `code`
         if c == '`' {
             let mut code_buf = String::new();
@@ -187,14 +212,15 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
             continue;
         }
 
-        // Bold (**text**) or Italic (*text*)
-        if c == '*' {
-            if chars.peek() == Some(&'*') {
-                chars.next(); // consume second '*'
+        // Bold (**text** or __text__) or Italic (*text* or _text_)
+        if c == '*' || c == '_' {
+            let target_char = c;
+            if chars.peek() == Some(&target_char) {
+                chars.next(); // consume second delimiter
                 let mut bold_buf = String::new();
                 let mut closed = false;
                 while let Some(next_c) = chars.next() {
-                    if next_c == '*' && chars.peek() == Some(&'*') {
+                    if next_c == target_char && chars.peek() == Some(&target_char) {
                         chars.next();
                         closed = true;
                         break;
@@ -207,14 +233,15 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     }
                     nodes.push(Node::text_with_marks(bold_buf, vec![Mark::strong()]));
                 } else {
-                    current_buf.push_str("**");
+                    current_buf.push(target_char);
+                    current_buf.push(target_char);
                     current_buf.push_str(&bold_buf);
                 }
             } else {
                 let mut italic_buf = String::new();
                 let mut closed = false;
                 for next_c in chars.by_ref() {
-                    if next_c == '*' {
+                    if next_c == target_char {
                         closed = true;
                         break;
                     }
@@ -226,7 +253,7 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     }
                     nodes.push(Node::text_with_marks(italic_buf, vec![Mark::em()]));
                 } else {
-                    current_buf.push('*');
+                    current_buf.push(target_char);
                     current_buf.push_str(&italic_buf);
                 }
             }
@@ -287,10 +314,6 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
         nodes.push(Node::text(current_buf));
     }
 
-    if nodes.is_empty() {
-        nodes.push(Node::text(""));
-    }
-
     nodes
 }
 
@@ -349,5 +372,32 @@ mod tests {
         let p_content = &doc.content[0].content;
         assert_eq!(p_content[1].text.as_deref(), Some("Atlassian"));
         assert_eq!(p_content[1].marks[0].mark_type, "link");
+    }
+
+    #[test]
+    fn test_text_to_adf_strikethrough_and_underscores() {
+        let input = "This is ~~deleted~~ and __important__ and _emphasized_.";
+        let doc = text_to_adf(input);
+
+        let p = &doc.content[0].content;
+        assert_eq!(p[1].text.as_deref(), Some("deleted"));
+        assert_eq!(p[1].marks[0].mark_type, "strike");
+
+        assert_eq!(p[3].text.as_deref(), Some("important"));
+        assert_eq!(p[3].marks[0].mark_type, "strong");
+
+        assert_eq!(p[5].text.as_deref(), Some("emphasized"));
+        assert_eq!(p[5].marks[0].mark_type, "em");
+    }
+
+    #[test]
+    fn test_text_to_adf_empty_input_schema_compliance() {
+        let doc = text_to_adf("");
+        assert_eq!(doc.content.len(), 1);
+        assert_eq!(doc.content[0].node_type, "paragraph");
+        assert!(
+            doc.content[0].content.is_empty(),
+            "Empty paragraph must have no child text nodes"
+        );
     }
 }

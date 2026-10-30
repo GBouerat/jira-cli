@@ -301,7 +301,8 @@ async fn handle_view(
     client: &JiraClient,
     output_mode: OutputMode,
 ) -> Result<()> {
-    let issue = client.get_issue(&args.key).await?;
+    let key = args.key.trim().to_uppercase();
+    let issue = client.get_issue(&key).await?;
 
     match output_mode {
         OutputMode::Json => {
@@ -376,25 +377,27 @@ async fn handle_create(
 }
 
 async fn handle_edit(args: IssueEditArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
     let desc_doc = args.description.as_deref().map(text_to_adf);
 
     client
         .edit_issue(
-            &args.key,
+            &key,
             args.summary.as_deref(),
             desc_doc.as_ref(),
             args.priority.as_deref(),
         )
         .await?;
 
-    println!("{} Updated issue {}", "✔".green().bold(), args.key.cyan());
+    println!("{} Updated issue {}", "✔".green().bold(), key.cyan());
     Ok(())
 }
 
 async fn handle_assign(args: IssueAssignArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
     if args.unassign {
-        client.assign_issue(&args.key, None).await?;
-        println!("{} Unassigned {}", "✔".green().bold(), args.key.cyan());
+        client.assign_issue(&key, None).await?;
+        println!("{} Unassigned {}", "✔".green().bold(), key.cyan());
         return Ok(());
     }
 
@@ -410,11 +413,11 @@ async fn handle_assign(args: IssueAssignArgs, client: &JiraClient) -> Result<()>
         user.account_id.clone()
     };
 
-    client.assign_issue(&args.key, Some(&account_id)).await?;
+    client.assign_issue(&key, Some(&account_id)).await?;
     println!(
         "{} Assigned {} to {}",
         "✔".green().bold(),
-        args.key.cyan(),
+        key.cyan(),
         target_user.bold()
     );
 
@@ -422,36 +425,42 @@ async fn handle_assign(args: IssueAssignArgs, client: &JiraClient) -> Result<()>
 }
 
 async fn handle_transition(args: IssueTransitionArgs, client: &JiraClient) -> Result<()> {
-    let transitions = client.get_transitions(&args.key).await?;
+    let key = args.key.trim().to_uppercase();
+    let transitions = client.get_transitions(&key).await?;
 
     match args.status {
         None => {
-            println!("Available transitions for {}:\n", args.key.cyan());
+            println!("Available transitions for {}:\n", key.cyan());
             println!("{}", render_transitions_table(&transitions));
             println!(
                 "\nAdvance status with: {}",
-                format!("jira issue transition {} <NAME_OR_ID>", args.key).yellow()
+                format!("jira issue transition {} <NAME_OR_ID>", key).yellow()
             );
         }
         Some(target) => {
-            let matched = transitions.iter().find(|t| {
-                t.id == target || t.name.eq_ignore_ascii_case(&target) || t.to.name.eq_ignore_ascii_case(&target)
-            }).ok_or_else(|| {
-                JiraError::Generic(format!(
-                    "Transition '{}' not available for {}. Run 'jira issue transition {}' to see options.",
-                    target, args.key, args.key
-                ))
-            })?;
+            let matched = transitions
+                .iter()
+                .find(|t| {
+                    t.id == target
+                        || t.name.eq_ignore_ascii_case(&target)
+                        || t.to.name.eq_ignore_ascii_case(&target)
+                })
+                .ok_or_else(|| {
+                    JiraError::Generic(format!(
+                        "Transition '{}' not available for {}. Run 'jira issue transition {}' to see options.",
+                        target, key, key
+                    ))
+                })?;
 
             let comment_doc = args.comment.as_deref().map(text_to_adf);
             client
-                .do_transition(&args.key, &matched.id, comment_doc.as_ref())
+                .do_transition(&key, &matched.id, comment_doc.as_ref())
                 .await?;
 
             println!(
                 "{} Transitioned {} to status '{}'",
                 "✔".green().bold(),
-                args.key.cyan(),
+                key.cyan(),
                 matched.to.name.green().bold()
             );
         }
@@ -461,13 +470,14 @@ async fn handle_transition(args: IssueTransitionArgs, client: &JiraClient) -> Re
 }
 
 async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
     match args.message {
         None => {
-            let comments = client.get_comments(&args.key).await?;
+            let comments = client.get_comments(&key).await?;
             if comments.comments.is_empty() {
-                println!("No comments on {}.", args.key.cyan());
+                println!("No comments on {}.", key.cyan());
             } else {
-                println!("Comments for {}:\n", args.key.cyan());
+                println!("Comments for {}:\n", key.cyan());
                 for comment in &comments.comments {
                     let author = comment
                         .author
@@ -484,12 +494,8 @@ async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<(
         }
         Some(msg) => {
             let adf_body = text_to_adf(&msg);
-            client.add_comment(&args.key, &adf_body).await?;
-            println!(
-                "{} Added comment to {}",
-                "✔".green().bold(),
-                args.key.cyan()
-            );
+            client.add_comment(&key, &adf_body).await?;
+            println!("{} Added comment to {}", "✔".green().bold(), key.cyan());
         }
     }
 
@@ -497,23 +503,25 @@ async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<(
 }
 
 async fn handle_worklog(args: IssueWorklogArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
     let comment_doc = args.comment.as_deref().map(text_to_adf);
     let worklog = client
-        .add_worklog(&args.key, &args.time, comment_doc.as_ref())
+        .add_worklog(&key, &args.time, comment_doc.as_ref())
         .await?;
 
     println!(
         "{} Logged {} on issue {}",
         "✔".green().bold(),
         worklog.time_spent.bold().green(),
-        args.key.cyan()
+        key.cyan()
     );
 
     Ok(())
 }
 
 fn handle_open(args: IssueOpenArgs, client: &JiraClient) -> Result<()> {
-    let url = format!("{}/browse/{}", client.instance_url(), args.key.trim());
+    let key = args.key.trim().to_uppercase();
+    let url = format!("{}/browse/{}", client.instance_url(), key);
     println!("Opening {} in web browser...", url.cyan());
     open::that(&url).map_err(|e| JiraError::Generic(format!("Failed to open browser: {}", e)))?;
     Ok(())
