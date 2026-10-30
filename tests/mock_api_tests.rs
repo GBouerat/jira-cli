@@ -313,3 +313,182 @@ async fn test_mock_api_error_response() {
         other => panic!("Expected JiraError::Api, got {:?}", other),
     }
 }
+
+#[tokio::test]
+async fn test_mock_delete_issue() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issue/DEV-100"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&mock_server)
+        .await;
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+    client
+        .delete_issue("dev-100", false)
+        .await
+        .expect("deletion should succeed");
+}
+
+#[tokio::test]
+async fn test_mock_attachments_api() {
+    let mock_server = MockServer::start().await;
+
+    let attachments_json = serde_json::json!({
+        "id": "100",
+        "key": "DEV-100",
+        "fields": {
+            "summary": "Attachment test",
+            "attachment": [
+                {
+                    "id": "5001",
+                    "filename": "screenshot.png",
+                    "size": 1024,
+                    "mimeType": "image/png",
+                    "content": "https://jira.example.com/attachments/5001"
+                }
+            ]
+        }
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/DEV-100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(attachments_json))
+        .mount(&mock_server)
+        .await;
+
+    let upload_resp = serde_json::json!([
+        {
+            "id": "5002",
+            "filename": "test.txt",
+            "size": 12,
+            "mimeType": "text/plain",
+            "content": "https://jira.example.com/attachments/5002"
+        }
+    ]);
+
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/issue/DEV-100/attachments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(upload_resp))
+        .mount(&mock_server)
+        .await;
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+
+    let list = client.get_attachments("DEV-100").await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].filename, "screenshot.png");
+
+    let uploaded = client
+        .add_attachment("DEV-100", "test.txt", b"hello world\n".to_vec())
+        .await
+        .unwrap();
+    assert_eq!(uploaded.len(), 1);
+    assert_eq!(uploaded[0].filename, "test.txt");
+}
+
+#[tokio::test]
+async fn test_mock_issue_links_and_watchers() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/issueLink"))
+        .respond_with(ResponseTemplate::new(201))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/rest/api/3/issueLink/999"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&mock_server)
+        .await;
+
+    let watchers_json = serde_json::json!({
+        "self": "https://jira.example.com/rest/api/3/issue/DEV-1/watchers",
+        "isWatching": true,
+        "watchCount": 1,
+        "watchers": [
+            {
+                "accountId": "acc-1",
+                "displayName": "Alice",
+                "active": true
+            }
+        ]
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/DEV-1/watchers"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(watchers_json))
+        .mount(&mock_server)
+        .await;
+
+    Mock::given(method("POST"))
+        .and(path("/rest/api/3/issue/DEV-1/watchers"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&mock_server)
+        .await;
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+
+    client
+        .link_issues("DEV-1", "DEV-2", "Blocks", None)
+        .await
+        .unwrap();
+    client.delete_issue_link("999").await.unwrap();
+
+    let watchers = client.get_watchers("DEV-1").await.unwrap();
+    assert_eq!(watchers.watch_count, 1);
+    assert!(watchers.is_watching);
+
+    client.add_watcher("DEV-1", "acc-2").await.unwrap();
+}
+
+#[tokio::test]
+async fn test_mock_project_versions_and_components() {
+    let mock_server = MockServer::start().await;
+
+    let versions_json = serde_json::json!([
+        {
+            "id": "1000",
+            "name": "1.0.0",
+            "archived": false,
+            "released": true,
+            "releaseDate": "2026-10-30"
+        }
+    ]);
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/project/DEV/versions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(versions_json))
+        .mount(&mock_server)
+        .await;
+
+    let comp_json = serde_json::json!([
+        {
+            "id": "2000",
+            "name": "Auth",
+            "description": "Authentication module"
+        }
+    ]);
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/project/DEV/components"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(comp_json))
+        .mount(&mock_server)
+        .await;
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+
+    let versions = client.list_project_versions("DEV").await.unwrap();
+    assert_eq!(versions.len(), 1);
+    assert_eq!(versions[0].name, "1.0.0");
+
+    let components = client.list_project_components("DEV").await.unwrap();
+    assert_eq!(components.len(), 1);
+    assert_eq!(components[0].name, "Auth");
+}

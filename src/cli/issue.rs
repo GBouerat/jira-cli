@@ -7,7 +7,10 @@ use crate::adf::from_text::text_to_adf;
 use crate::client::JiraClient;
 use crate::error::{JiraError, Result};
 use crate::ui::format::OutputMode;
-use crate::ui::{render_issue_detail, render_issues_table, render_transitions_table};
+use crate::ui::{
+    render_attachments_table, render_changelog_table, render_issue_detail,
+    render_issue_links_table, render_issues_table, render_transitions_table, render_watchers_table,
+};
 use clap::{Args, Subcommand};
 use colored::Colorize;
 
@@ -34,6 +37,9 @@ pub enum IssueSubcommand {
     /// Edit summary, description, or priority of an existing issue.
     Edit(IssueEditArgs),
 
+    /// Delete an issue permanently.
+    Delete(IssueDeleteArgs),
+
     /// Assign an issue to a user or '@me'.
     Assign(IssueAssignArgs),
 
@@ -48,6 +54,33 @@ pub enum IssueSubcommand {
 
     /// Open an issue in the default web browser.
     Open(IssueOpenArgs),
+
+    /// Upload an attachment to an issue.
+    Attach(IssueAttachArgs),
+
+    /// List attachments belonging to an issue.
+    Attachments(IssueAttachmentsArgs),
+
+    /// Link two issues together with a named relationship.
+    Link(IssueLinkArgs),
+
+    /// List issue links for an issue.
+    Links(IssueLinksArgs),
+
+    /// Remove a link between two issues by link ID.
+    Unlink(IssueUnlinkArgs),
+
+    /// Add a watcher to an issue.
+    Watch(IssueWatchArgs),
+
+    /// Remove a watcher from an issue.
+    Unwatch(IssueUnwatchArgs),
+
+    /// List watchers for an issue.
+    Watchers(IssueWatchersArgs),
+
+    /// View field modification history (changelog) for an issue.
+    History(IssueHistoryArgs),
 }
 
 /// Arguments for `jira issue list`.
@@ -187,6 +220,110 @@ pub struct IssueOpenArgs {
     pub key: String,
 }
 
+/// Arguments for `jira issue delete <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueDeleteArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Whether to delete associated subtasks.
+    #[arg(long, default_value_t = false)]
+    pub delete_subtasks: bool,
+
+    /// Skip confirmation prompt.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+}
+
+/// Arguments for `jira issue attach <KEY> <FILE>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueAttachArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Path to the file to attach.
+    pub file: std::path::PathBuf,
+}
+
+/// Arguments for `jira issue attachments <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueAttachmentsArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+}
+
+/// Arguments for `jira issue link <INWARD> <OUTWARD>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueLinkArgs {
+    /// Source issue key or ID (inward issue).
+    pub inward: String,
+
+    /// Target issue key or ID (outward issue).
+    pub outward: String,
+
+    /// Relationship link type (e.g. 'Blocks', 'Relates', 'Duplicates').
+    #[arg(short = 't', long, default_value = "Relates")]
+    pub link_type: String,
+
+    /// Optional comment explaining the relationship.
+    #[arg(short = 'm', long)]
+    pub comment: Option<String>,
+}
+
+/// Arguments for `jira issue links <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueLinksArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+}
+
+/// Arguments for `jira issue unlink <LINK_ID>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueUnlinkArgs {
+    /// Unique issue link ID.
+    pub link_id: String,
+}
+
+/// Arguments for `jira issue watch <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueWatchArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Account ID or username to add as watcher (defaults to current user).
+    #[arg(short = 'u', long)]
+    pub user: Option<String>,
+}
+
+/// Arguments for `jira issue unwatch <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueUnwatchArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Account ID or username to remove from watchers (defaults to current user).
+    #[arg(short = 'u', long)]
+    pub user: Option<String>,
+}
+
+/// Arguments for `jira issue watchers <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueWatchersArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+}
+
+/// Arguments for `jira issue history <KEY>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueHistoryArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Maximum number of changelog entries to retrieve.
+    #[arg(short, long, default_value_t = 50)]
+    pub limit: u32,
+}
+
 /// Dispatches issue subcommands.
 pub async fn handle_issue_command(
     args: IssueArgs,
@@ -203,11 +340,29 @@ pub async fn handle_issue_command(
             handle_create(create_args, client, default_project).await
         }
         IssueSubcommand::Edit(edit_args) => handle_edit(edit_args, client).await,
+        IssueSubcommand::Delete(delete_args) => handle_delete(delete_args, client).await,
         IssueSubcommand::Assign(assign_args) => handle_assign(assign_args, client).await,
         IssueSubcommand::Transition(trans_args) => handle_transition(trans_args, client).await,
         IssueSubcommand::Comment(comment_args) => handle_comment(comment_args, client).await,
         IssueSubcommand::Worklog(worklog_args) => handle_worklog(worklog_args, client).await,
         IssueSubcommand::Open(open_args) => handle_open(open_args, client),
+        IssueSubcommand::Attach(attach_args) => {
+            handle_attach(attach_args, client, output_mode).await
+        }
+        IssueSubcommand::Attachments(attachments_args) => {
+            handle_attachments(attachments_args, client, output_mode).await
+        }
+        IssueSubcommand::Link(link_args) => handle_link(link_args, client).await,
+        IssueSubcommand::Links(links_args) => handle_links(links_args, client, output_mode).await,
+        IssueSubcommand::Unlink(unlink_args) => handle_unlink(unlink_args, client).await,
+        IssueSubcommand::Watch(watch_args) => handle_watch(watch_args, client).await,
+        IssueSubcommand::Unwatch(unwatch_args) => handle_unwatch(unwatch_args, client).await,
+        IssueSubcommand::Watchers(watchers_args) => {
+            handle_watchers(watchers_args, client, output_mode).await
+        }
+        IssueSubcommand::History(history_args) => {
+            handle_history(history_args, client, output_mode).await
+        }
     }
 }
 
@@ -525,4 +680,341 @@ fn handle_open(args: IssueOpenArgs, client: &JiraClient) -> Result<()> {
     println!("Opening {} in web browser...", url.cyan());
     open::that(&url).map_err(|e| JiraError::Generic(format!("Failed to open browser: {}", e)))?;
     Ok(())
+}
+
+async fn handle_delete(args: IssueDeleteArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    if !args.yes {
+        let confirmed = inquire::Confirm::new(&format!("Permanently delete issue {}?", key))
+            .with_default(false)
+            .prompt()
+            .map_err(|e| JiraError::Prompt(e.to_string()))?;
+        if !confirmed {
+            println!("Deletion cancelled.");
+            return Ok(());
+        }
+    }
+    client.delete_issue(&key, args.delete_subtasks).await?;
+    println!("{} Deleted issue {}.", "✔".green().bold(), key.cyan());
+    Ok(())
+}
+
+async fn handle_attach(
+    args: IssueAttachArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    if !args.file.exists() {
+        return Err(JiraError::Generic(format!(
+            "File not found: {}",
+            args.file.display()
+        )));
+    }
+    let filename = args
+        .file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| JiraError::Generic("Invalid filename".to_string()))?;
+    let bytes = std::fs::read(&args.file).map_err(|e| {
+        JiraError::Generic(format!(
+            "Failed to read file {}: {}",
+            args.file.display(),
+            e
+        ))
+    })?;
+
+    let attachments = client.add_attachment(&key, filename, bytes).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&attachments)?);
+        }
+        OutputMode::Table | OutputMode::Plain | OutputMode::Markdown => {
+            println!(
+                "{} Attached {} to issue {}.",
+                "✔".green().bold(),
+                filename.bold(),
+                key.cyan()
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn handle_attachments(
+    args: IssueAttachmentsArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let attachments = client.get_attachments(&key).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&attachments)?);
+        }
+        OutputMode::Markdown => {
+            println!("| ID | Filename | Size | MIME Type | Author | Created |");
+            println!("| --- | --- | --- | --- | --- | --- |");
+            for a in &attachments {
+                let author = a
+                    .author
+                    .as_ref()
+                    .map(|u| u.display_name.as_str())
+                    .unwrap_or("-");
+                let mime = a.mime_type.as_deref().unwrap_or("-");
+                let created = a.created.as_deref().unwrap_or("-");
+                println!(
+                    "| {} | {} | {} | {} | {} | {} |",
+                    a.id, a.filename, a.size, mime, author, created
+                );
+            }
+        }
+        OutputMode::Table | OutputMode::Plain => {
+            println!("{}", render_attachments_table(&attachments));
+        }
+    }
+    Ok(())
+}
+
+async fn handle_link(args: IssueLinkArgs, client: &JiraClient) -> Result<()> {
+    let inward = args.inward.trim().to_uppercase();
+    let outward = args.outward.trim().to_uppercase();
+    let comment_doc = args.comment.as_deref().map(text_to_adf);
+
+    client
+        .link_issues(&inward, &outward, &args.link_type, comment_doc.as_ref())
+        .await?;
+
+    println!(
+        "{} Linked {} and {} with relation '{}'.",
+        "✔".green().bold(),
+        inward.cyan(),
+        outward.cyan(),
+        args.link_type.bold()
+    );
+    Ok(())
+}
+
+async fn handle_links(
+    args: IssueLinksArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let links = client.get_issue_links(&key).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&links)?);
+        }
+        OutputMode::Markdown => {
+            println!("| Link ID | Relationship | Issue | Summary | Status |");
+            println!("| --- | --- | --- | --- | --- |");
+            for l in &links {
+                let (rel, target) = if let Some(ref o) = l.outward_issue {
+                    (&l.link_type.outward, Some(o))
+                } else if let Some(ref i) = l.inward_issue {
+                    (&l.link_type.inward, Some(i))
+                } else {
+                    (&l.link_type.name, None)
+                };
+                let target_key = target.map(|t| t.key.as_str()).unwrap_or("-");
+                let summary = target
+                    .and_then(|t| t.fields.as_ref())
+                    .map(|f| f.summary.as_str())
+                    .unwrap_or("-");
+                let status = target
+                    .and_then(|t| t.fields.as_ref())
+                    .and_then(|f| f.status.as_ref())
+                    .map(|s| s.name.as_str())
+                    .unwrap_or("-");
+                println!(
+                    "| {} | {} | {} | {} | {} |",
+                    l.id, rel, target_key, summary, status
+                );
+            }
+        }
+        OutputMode::Table | OutputMode::Plain => {
+            println!("{}", render_issue_links_table(&links, &key));
+        }
+    }
+    Ok(())
+}
+
+async fn handle_unlink(args: IssueUnlinkArgs, client: &JiraClient) -> Result<()> {
+    client.delete_issue_link(&args.link_id).await?;
+    println!(
+        "{} Deleted issue link {}.",
+        "✔".green().bold(),
+        args.link_id.cyan()
+    );
+    Ok(())
+}
+
+async fn handle_watch(args: IssueWatchArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let account_id = match args.user {
+        Some(ref u) if u.eq_ignore_ascii_case("@me") => client.myself().await?.account_id,
+        Some(ref u) => {
+            let found = client.find_users(u).await?;
+            found
+                .into_iter()
+                .next()
+                .map(|usr| usr.account_id)
+                .unwrap_or_else(|| u.clone())
+        }
+        None => client.myself().await?.account_id,
+    };
+
+    client.add_watcher(&key, &account_id).await?;
+    println!(
+        "{} Added watcher to issue {}.",
+        "✔".green().bold(),
+        key.cyan()
+    );
+    Ok(())
+}
+
+async fn handle_unwatch(args: IssueUnwatchArgs, client: &JiraClient) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let account_id = match args.user {
+        Some(ref u) if u.eq_ignore_ascii_case("@me") => client.myself().await?.account_id,
+        Some(ref u) => {
+            let found = client.find_users(u).await?;
+            found
+                .into_iter()
+                .next()
+                .map(|usr| usr.account_id)
+                .unwrap_or_else(|| u.clone())
+        }
+        None => client.myself().await?.account_id,
+    };
+
+    client.remove_watcher(&key, &account_id).await?;
+    println!(
+        "{} Removed watcher from issue {}.",
+        "✔".green().bold(),
+        key.cyan()
+    );
+    Ok(())
+}
+
+async fn handle_watchers(
+    args: IssueWatchersArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let watchers = client.get_watchers(&key).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&watchers)?);
+        }
+        OutputMode::Markdown => {
+            println!("| Account ID | Display Name | Active |");
+            println!("| --- | --- | --- |");
+            for w in &watchers.watchers {
+                let act = if w.active { "yes" } else { "no" };
+                println!("| {} | {} | {} |", w.account_id, w.display_name, act);
+            }
+        }
+        OutputMode::Table | OutputMode::Plain => {
+            println!("{}", render_watchers_table(&watchers));
+        }
+    }
+    Ok(())
+}
+
+async fn handle_history(
+    args: IssueHistoryArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let changelogs = client.get_issue_changelog(&key, args.limit).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&changelogs)?);
+        }
+        OutputMode::Markdown => {
+            println!("| Date | Author | Field | From | To |");
+            println!("| --- | --- | --- | --- | --- |");
+            for c in &changelogs {
+                let author = c
+                    .author
+                    .as_ref()
+                    .map(|u| u.display_name.as_str())
+                    .unwrap_or("System");
+                for item in &c.items {
+                    let from = item.from_string.as_deref().unwrap_or("-");
+                    let to = item.to_string.as_deref().unwrap_or("-");
+                    println!(
+                        "| {} | {} | {} | {} | {} |",
+                        c.created, author, item.field, from, to
+                    );
+                }
+            }
+        }
+        OutputMode::Table | OutputMode::Plain => {
+            println!("{}", render_changelog_table(&changelogs));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        command: IssueSubcommand,
+    }
+
+    #[test]
+    fn test_issue_subcommand_parsing() {
+        let cli = TestCli::try_parse_from(["jira", "delete", "DEV-123", "-y"]).unwrap();
+        match cli.command {
+            IssueSubcommand::Delete(args) => {
+                assert_eq!(args.key, "DEV-123");
+                assert!(args.yes);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli =
+            TestCli::try_parse_from(["jira", "link", "DEV-1", "DEV-2", "-t", "Blocks"]).unwrap();
+        match cli.command {
+            IssueSubcommand::Link(args) => {
+                assert_eq!(args.inward, "DEV-1");
+                assert_eq!(args.outward, "DEV-2");
+                assert_eq!(args.link_type, "Blocks");
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from(["jira", "watch", "DEV-1", "-u", "557058:xxx"]).unwrap();
+        match cli.command {
+            IssueSubcommand::Watch(args) => {
+                assert_eq!(args.key, "DEV-1");
+                assert_eq!(args.user.as_deref(), Some("557058:xxx"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from(["jira", "history", "DEV-1", "-l", "20"]).unwrap();
+        match cli.command {
+            IssueSubcommand::History(args) => {
+                assert_eq!(args.key, "DEV-1");
+                assert_eq!(args.limit, 20);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
 }

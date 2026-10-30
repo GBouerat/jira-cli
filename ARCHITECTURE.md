@@ -41,8 +41,8 @@ An asynchronous client utilizing `reqwest` and `tokio`:
 - **Middleware & Error Handling (`src/client/middleware.rs`):**
   - Intercepts HTTP 429 Too Many Requests and reads the `Retry-After` header.
   - Deserializes Jira's structured `errorMessages` and `errors` maps into typed `JiraError::Api` variants.
-- **Issue Operations (`src/client/issue.rs`):** CRUD operations, JQL queries, workflow transitions, comments, and worklogs.
-- **Agile & Project APIs (`src/client/sprint.rs`, `src/client/project.rs`):** Boards, sprints, and project schemes.
+- **Issue Operations (`src/client/issue.rs`):** Full CRUD operations (including permanent deletion with subtasks), JQL queries, workflow transitions, comments, worklogs, multipart file attachments, bidirectional issue links, watcher management, and changelog history.
+- **Agile & Project APIs (`src/client/sprint.rs`, `src/client/project.rs`):** Boards, sprints, project metadata, release version lifecycle, and project components.
 
 ### 2.3 Configuration & Resolver (`src/config/`)
 - Stored at `~/.config/jira-cli/config.json` (or custom `--config` path).

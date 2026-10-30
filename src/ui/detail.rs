@@ -124,6 +124,60 @@ pub fn render_issue_detail(issue: &Issue, instance_url: &str) -> String {
         ));
     }
 
+    // Linked Issues
+    if let Some(links) = &issue.fields.issuelinks {
+        if !links.is_empty() {
+            out.push_str(&format!(
+                "{}\n",
+                format!("─── Linked Issues ({}) ───────────────────", links.len()).dimmed()
+            ));
+            for link in links {
+                let (rel, target) = if let Some(ref o) = link.outward_issue {
+                    (&link.link_type.outward, Some(o))
+                } else if let Some(ref i) = link.inward_issue {
+                    (&link.link_type.inward, Some(i))
+                } else {
+                    (&link.link_type.name, None)
+                };
+                let target_key = target.map(|t| t.key.as_str()).unwrap_or("-");
+                let summary = target
+                    .and_then(|t| t.fields.as_ref())
+                    .map(|f| f.summary.as_str())
+                    .unwrap_or("-");
+                out.push_str(&format!(
+                    "• {} {} - {}\n",
+                    rel.dimmed(),
+                    target_key.bold().cyan(),
+                    summary
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    // Attachments
+    if let Some(attachments) = &issue.fields.attachment {
+        if !attachments.is_empty() {
+            out.push_str(&format!(
+                "{}\n",
+                format!(
+                    "─── Attachments ({}) ─────────────────────",
+                    attachments.len()
+                )
+                .dimmed()
+            ));
+            for att in attachments {
+                out.push_str(&format!(
+                    "• {} ({}, id: {})\n",
+                    att.filename.bold(),
+                    att.size,
+                    att.id.dimmed()
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
     // 4. Comments Section (ADF)
     if let Some(comment_resp) = &issue.fields.comment {
         let count = comment_resp.comments.len();
@@ -180,6 +234,8 @@ mod tests {
                 updated: None,
                 description: None,
                 comment: None,
+                attachment: None,
+                issuelinks: None,
                 labels: vec![],
             },
         };

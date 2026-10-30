@@ -59,6 +59,12 @@ pub struct IssueFields {
     /// Associated issue labels.
     #[serde(default)]
     pub labels: Vec<String>,
+
+    /// Attached files.
+    pub attachment: Option<Vec<Attachment>>,
+
+    /// Associated issue relationships.
+    pub issuelinks: Option<Vec<IssueLink>>,
 }
 
 /// Workflow status of an issue.
@@ -253,9 +259,211 @@ pub struct Worklog {
     pub started: Option<String>,
 }
 
+/// An attached file associated with a Jira issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Attachment {
+    /// Attachment ID.
+    pub id: String,
+
+    /// Original file name.
+    pub filename: String,
+
+    /// Size of the file in bytes.
+    pub size: u64,
+
+    /// MIME content type (e.g., `image/png`, `application/pdf`).
+    #[serde(rename = "mimeType")]
+    pub mime_type: Option<String>,
+
+    /// User who uploaded the attachment.
+    pub author: Option<User>,
+
+    /// ISO-8601 upload timestamp.
+    pub created: Option<String>,
+
+    /// Direct download URL for the attachment content.
+    pub content: String,
+}
+
+/// Type definition for issue links (e.g. "Blocks", "Relates to", "Clones").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueLinkType {
+    /// Unique link type ID.
+    pub id: String,
+
+    /// Name of the link type (e.g. "Blocks").
+    pub name: String,
+
+    /// Inward label (e.g. "is blocked by").
+    pub inward: String,
+
+    /// Outward label (e.g. "blocks").
+    pub outward: String,
+}
+
+/// Response wrapper for listing issue link types.
+#[derive(Debug, Clone, Deserialize)]
+pub struct IssueLinkTypesResponse {
+    /// Available link types.
+    #[serde(rename = "issueLinkTypes", default)]
+    pub issue_link_types: Vec<IssueLinkType>,
+}
+
+/// Relationship link connecting two Jira issues.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueLink {
+    /// Unique link ID.
+    pub id: String,
+
+    /// Link type definition.
+    #[serde(rename = "type")]
+    pub link_type: IssueLinkType,
+
+    /// Inward linked issue if current issue is the outward side.
+    #[serde(rename = "inwardIssue")]
+    pub inward_issue: Option<LinkedIssue>,
+
+    /// Outward linked issue if current issue is the inward side.
+    #[serde(rename = "outwardIssue")]
+    pub outward_issue: Option<LinkedIssue>,
+}
+
+/// Minimal representation of an issue referenced inside a link.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedIssue {
+    /// Issue ID.
+    pub id: String,
+
+    /// Issue key (e.g. "PROJ-10").
+    pub key: String,
+
+    /// Summary and status fields of the linked issue.
+    pub fields: Option<LinkedIssueFields>,
+}
+
+/// Summary fields of a linked issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedIssueFields {
+    /// Summary of the linked issue.
+    pub summary: String,
+
+    /// Status of the linked issue.
+    pub status: Option<Status>,
+
+    /// Priority of the linked issue.
+    pub priority: Option<Priority>,
+
+    /// Type of the linked issue.
+    pub issuetype: Option<IssueType>,
+}
+
+/// Watcher status and list for an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Watchers {
+    /// Self URL.
+    #[serde(rename = "self")]
+    pub self_url: String,
+
+    /// Whether the authenticated user is watching this issue.
+    #[serde(rename = "isWatching")]
+    pub is_watching: bool,
+
+    /// Total count of watchers.
+    #[serde(rename = "watchCount")]
+    pub watch_count: u64,
+
+    /// List of watching users.
+    #[serde(default)]
+    pub watchers: Vec<User>,
+}
+
+/// History record for field modifications on an issue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Changelog {
+    /// Changelog record ID.
+    pub id: String,
+
+    /// User who made the change.
+    pub author: Option<User>,
+
+    /// ISO-8601 timestamp when the change was made.
+    pub created: String,
+
+    /// Individual field changes.
+    #[serde(default)]
+    pub items: Vec<ChangeItem>,
+}
+
+/// Individual field modification inside a changelog entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeItem {
+    /// Name of the field modified (e.g. "status", "assignee", "summary").
+    pub field: String,
+
+    /// Previous value display string.
+    #[serde(rename = "fromString")]
+    pub from_string: Option<String>,
+
+    /// New value display string.
+    #[serde(rename = "toString")]
+    pub to_string: Option<String>,
+}
+
+/// Paginated changelog response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChangelogResponse {
+    /// List of history records.
+    #[serde(default)]
+    pub values: Vec<Changelog>,
+
+    /// Total count of history records.
+    #[serde(default)]
+    pub total: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_deserialize_attachment() {
+        let json = r#"{
+            "id": "10050",
+            "filename": "screenshot.png",
+            "size": 102400,
+            "mimeType": "image/png",
+            "content": "https://example.atlassian.net/rest/api/3/attachment/content/10050"
+        }"#;
+
+        let att: Attachment = serde_json::from_str(json).unwrap();
+        assert_eq!(att.filename, "screenshot.png");
+        assert_eq!(att.size, 102400);
+        assert_eq!(att.mime_type.as_deref(), Some("image/png"));
+    }
+
+    #[test]
+    fn test_deserialize_issue_link() {
+        let json = r#"{
+            "id": "100",
+            "type": {
+                "id": "1",
+                "name": "Blocks",
+                "inward": "is blocked by",
+                "outward": "blocks"
+            },
+            "outwardIssue": {
+                "id": "1002",
+                "key": "DEV-2",
+                "fields": {
+                    "summary": "Target blocked issue"
+                }
+            }
+        }"#;
+
+        let link: IssueLink = serde_json::from_str(json).unwrap();
+        assert_eq!(link.link_type.name, "Blocks");
+        assert_eq!(link.outward_issue.unwrap().key, "DEV-2");
+    }
 
     #[test]
     fn test_deserialize_issue_json() {

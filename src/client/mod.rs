@@ -13,14 +13,16 @@ pub mod sprint;
 use crate::adf::ast::DocNode;
 use crate::client::auth::{build_basic_auth_header, build_user_agent_header};
 use crate::client::issue::{
-    Comment, CommentsResponse, CreatedIssue, Issue, SearchResults, Transition, TransitionsResponse,
-    User, Worklog,
+    Attachment, Changelog, ChangelogResponse, Comment, CommentsResponse, CreatedIssue, Issue,
+    IssueLink, IssueLinkType, IssueLinkTypesResponse, SearchResults, Transition,
+    TransitionsResponse, User, Watchers, Worklog,
 };
 use crate::client::middleware::handle_response_errors;
-use crate::client::project::Project;
+use crate::client::project::{Component, Project, Version};
 use crate::client::sprint::{Board, BoardsResponse, Sprint, SprintsResponse};
 use crate::config::ResolvedConfig;
 use crate::error::{JiraError, Result};
+use reqwest::multipart::{Form, Part};
 use reqwest::{Client, Method, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 use serde_json::json;
@@ -376,6 +378,157 @@ impl JiraClient {
         self.execute_json(req).await
     }
 
+    /// Deletes an issue by key or ID.
+    pub async fn delete_issue(&self, issue_key: &str, delete_subtasks: bool) -> Result<()> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
+        let req = self
+            .request(Method::DELETE, &endpoint)
+            .query(&[("deleteSubtasks", delete_subtasks.to_string())]);
+
+        self.execute(req).await?;
+        Ok(())
+    }
+
+    /// Fetches all attachments associated with an issue.
+    pub async fn get_attachments(&self, issue_key: &str) -> Result<Vec<Attachment>> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
+        let req = self
+            .request(Method::GET, &endpoint)
+            .query(&[("fields", "attachment")]);
+        let issue: Issue = self.execute_json(req).await?;
+        Ok(issue.fields.attachment.unwrap_or_default())
+    }
+
+    /// Uploads an attachment to an issue using multipart form upload.
+    pub async fn add_attachment(
+        &self,
+        issue_key: &str,
+        filename: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Vec<Attachment>> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/attachments", clean_key);
+
+        let part = Part::bytes(bytes).file_name(filename.to_string());
+        let form = Form::new().part("file", part);
+
+        let req = self
+            .request(Method::POST, &endpoint)
+            .header("X-Atlassian-Token", "no-check")
+            .multipart(form);
+
+        self.execute_json(req).await
+    }
+
+    /// Fetches all configured issue link types.
+    pub async fn get_issue_link_types(&self) -> Result<Vec<IssueLinkType>> {
+        let req = self.request(Method::GET, "/rest/api/3/issueLinkType");
+        let resp: IssueLinkTypesResponse = self.execute_json(req).await?;
+        Ok(resp.issue_link_types)
+    }
+
+    /// Links two issues together with a named relationship (e.g. "Blocks").
+    pub async fn link_issues(
+        &self,
+        inward_key: &str,
+        outward_key: &str,
+        link_type_name: &str,
+        comment: Option<&DocNode>,
+    ) -> Result<()> {
+        let clean_inward = inward_key.trim().to_uppercase();
+        let clean_outward = outward_key.trim().to_uppercase();
+
+        let mut payload = json!({
+            "type": { "name": link_type_name },
+            "inwardIssue": { "key": clean_inward },
+            "outwardIssue": { "key": clean_outward }
+        });
+
+        if let Some(c) = comment {
+            payload["comment"] = json!({ "body": c });
+        }
+
+        let req = self
+            .request(Method::POST, "/rest/api/3/issueLink")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&payload);
+
+        self.execute(req).await?;
+        Ok(())
+    }
+
+    /// Removes an issue link by ID.
+    pub async fn delete_issue_link(&self, link_id: &str) -> Result<()> {
+        let endpoint = format!("/rest/api/3/issueLink/{}", link_id.trim());
+        let req = self.request(Method::DELETE, &endpoint);
+        self.execute(req).await?;
+        Ok(())
+    }
+
+    /// Fetches all issue links attached to an issue.
+    pub async fn get_issue_links(&self, issue_key: &str) -> Result<Vec<IssueLink>> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
+        let req = self
+            .request(Method::GET, &endpoint)
+            .query(&[("fields", "issuelinks")]);
+        let issue: Issue = self.execute_json(req).await?;
+        Ok(issue.fields.issuelinks.unwrap_or_default())
+    }
+
+    /// Fetches watchers metadata for an issue.
+    pub async fn get_watchers(&self, issue_key: &str) -> Result<Watchers> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/watchers", clean_key);
+        let req = self.request(Method::GET, &endpoint);
+        self.execute_json(req).await
+    }
+
+    /// Adds a user as a watcher on an issue.
+    pub async fn add_watcher(&self, issue_key: &str, account_id: &str) -> Result<()> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/watchers", clean_key);
+        let payload = json!(account_id);
+
+        let req = self
+            .request(Method::POST, &endpoint)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&payload);
+
+        self.execute(req).await?;
+        Ok(())
+    }
+
+    /// Removes a user from watching an issue.
+    pub async fn remove_watcher(&self, issue_key: &str, account_id: &str) -> Result<()> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/watchers", clean_key);
+        let req = self
+            .request(Method::DELETE, &endpoint)
+            .query(&[("accountId", account_id)]);
+
+        self.execute(req).await?;
+        Ok(())
+    }
+
+    /// Fetches issue field modification history (changelog).
+    pub async fn get_issue_changelog(
+        &self,
+        issue_key: &str,
+        max_results: u32,
+    ) -> Result<Vec<Changelog>> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}/changelog", clean_key);
+        let req = self
+            .request(Method::GET, &endpoint)
+            .query(&[("maxResults", max_results.to_string())]);
+
+        let resp: ChangelogResponse = self.execute_json(req).await?;
+        Ok(resp.values)
+    }
+
     // ------------------------------------------------------------------------
     // Project APIs
     // ------------------------------------------------------------------------
@@ -388,10 +541,57 @@ impl JiraClient {
 
     /// Gets details of a specific project by key or ID.
     pub async fn get_project(&self, project_key: &str) -> Result<Project> {
-        let endpoint = format!("/rest/api/3/project/{}", project_key.trim());
+        let clean_key = project_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/project/{}", clean_key);
         let req = self
             .request(Method::GET, &endpoint)
             .query(&[("expand", "description,lead,issueTypes")]);
+        self.execute_json(req).await
+    }
+
+    /// Lists release versions for a project.
+    pub async fn list_project_versions(&self, project_key: &str) -> Result<Vec<Version>> {
+        let clean_key = project_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/project/{}/versions", clean_key);
+        let req = self.request(Method::GET, &endpoint);
+        self.execute_json(req).await
+    }
+
+    /// Creates a new release version in a project.
+    pub async fn create_version(
+        &self,
+        project_key: &str,
+        name: &str,
+        description: Option<&str>,
+        release_date: Option<&str>,
+    ) -> Result<Version> {
+        let clean_key = project_key.trim().to_uppercase();
+        let mut payload = json!({
+            "project": clean_key,
+            "name": name,
+        });
+
+        if let Some(d) = description {
+            payload["description"] = json!(d);
+        }
+
+        if let Some(rd) = release_date {
+            payload["releaseDate"] = json!(rd);
+        }
+
+        let req = self
+            .request(Method::POST, "/rest/api/3/version")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&payload);
+
+        self.execute_json(req).await
+    }
+
+    /// Lists components defined in a project.
+    pub async fn list_project_components(&self, project_key: &str) -> Result<Vec<Component>> {
+        let clean_key = project_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/project/{}/components", clean_key);
+        let req = self.request(Method::GET, &endpoint);
         self.execute_json(req).await
     }
 
