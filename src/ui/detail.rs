@@ -4,7 +4,7 @@
 
 use crate::adf::to_terminal::adf_to_terminal;
 use crate::client::issue::Issue;
-use crate::ui::table::create_styled_table;
+use crate::ui::table::{create_styled_table, format_file_size};
 use colored::Colorize;
 use comfy_table::{Attribute, Cell, Color};
 
@@ -170,7 +170,7 @@ pub fn render_issue_detail(issue: &Issue, instance_url: &str) -> String {
                 out.push_str(&format!(
                     "• {} ({}, id: {})\n",
                     att.filename.bold(),
-                    att.size,
+                    format_file_size(att.size),
                     att.id.dimmed()
                 ));
             }

@@ -256,7 +256,7 @@ pub fn render_transitions_table(transitions: &[Transition]) -> String {
 }
 
 /// Formats a raw byte count into human-readable units (B, KB, MB, GB).
-fn format_file_size(bytes: u64) -> String {
+pub fn format_file_size(bytes: u64) -> String {
     if bytes < 1024 {
         format!("{} B", bytes)
     } else if bytes < 1024 * 1024 {

@@ -199,7 +199,7 @@ impl JiraClient {
         let endpoint = format!("/rest/api/3/issue/{}", clean_key);
         let req = self.request(Method::GET, &endpoint).query(&[(
             "fields",
-            "summary,status,issuetype,priority,assignee,reporter,created,updated,description,comment,labels",
+            "summary,status,issuetype,priority,assignee,reporter,created,updated,description,comment,labels,attachment,issuelinks",
         )]);
         self.execute_json(req).await
     }
@@ -440,8 +440,22 @@ impl JiraClient {
         let clean_inward = inward_key.trim().to_uppercase();
         let clean_outward = outward_key.trim().to_uppercase();
 
+        let clean_type_name = match link_type_name.trim().to_ascii_lowercase().as_str() {
+            "blocks" => "Blocks".to_string(),
+            "relates" | "relates to" => "Relates".to_string(),
+            "duplicates" => "Duplicate".to_string(),
+            "clones" => "Cloners".to_string(),
+            other => {
+                let mut chars = other.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            }
+        };
+
         let mut payload = json!({
-            "type": { "name": link_type_name },
+            "type": { "name": clean_type_name },
             "inwardIssue": { "key": clean_inward },
             "outwardIssue": { "key": clean_outward }
         });

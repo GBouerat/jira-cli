@@ -76,7 +76,7 @@ impl Cli {
 /// Available subcommands for the `jira` binary.
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Issue operations (list, view, create, edit, assign, transition, comment, worklog, open).
+    /// Issue operations (query, view, create, edit, delete, assign, transition, comment, worklog, attach, link, watch, history).
     Issue(IssueArgs),
 
     /// Agile sprint and board operations.

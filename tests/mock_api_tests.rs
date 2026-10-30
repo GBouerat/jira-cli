@@ -119,7 +119,34 @@ async fn test_mock_get_issue_with_adf() {
                         ]
                     }
                 ]
-            }
+            },
+            "attachment": [
+                {
+                    "id": "9001",
+                    "filename": "spec.pdf",
+                    "size": 5120,
+                    "mimeType": "application/pdf",
+                    "content": "https://jira.example.com/attachments/9001"
+                }
+            ],
+            "issuelinks": [
+                {
+                    "id": "8001",
+                    "type": {
+                        "id": "1",
+                        "name": "Blocks",
+                        "inward": "is blocked by",
+                        "outward": "blocks"
+                    },
+                    "outwardIssue": {
+                        "id": "2002",
+                        "key": "DEV-203",
+                        "fields": {
+                            "summary": "Dependent feature"
+                        }
+                    }
+                }
+            ]
         }
     });
 
@@ -134,6 +161,8 @@ async fn test_mock_get_issue_with_adf() {
     let issue = client.get_issue("DEV-202").await.expect("get issue failed");
 
     assert_eq!(issue.key, "DEV-202");
+    assert_eq!(issue.fields.attachment.as_ref().unwrap().len(), 1);
+    assert_eq!(issue.fields.issuelinks.as_ref().unwrap().len(), 1);
     let desc = issue.fields.description.expect("description missing");
     assert_eq!(desc.node_type, "doc");
     assert_eq!(desc.content[0].node_type, "paragraph");
@@ -396,6 +425,11 @@ async fn test_mock_issue_links_and_watchers() {
 
     Mock::given(method("POST"))
         .and(path("/rest/api/3/issueLink"))
+        .and(wiremock::matchers::body_json(serde_json::json!({
+            "type": { "name": "Blocks" },
+            "inwardIssue": { "key": "DEV-1" },
+            "outwardIssue": { "key": "DEV-2" }
+        })))
         .respond_with(ResponseTemplate::new(201))
         .mount(&mock_server)
         .await;
@@ -435,7 +469,7 @@ async fn test_mock_issue_links_and_watchers() {
         JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
 
     client
-        .link_issues("DEV-1", "DEV-2", "Blocks", None)
+        .link_issues("dev-1", "dev-2", "blocks", None)
         .await
         .unwrap();
     client.delete_issue_link("999").await.unwrap();

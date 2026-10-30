@@ -533,6 +533,16 @@ async fn handle_create(
 
 async fn handle_edit(args: IssueEditArgs, client: &JiraClient) -> Result<()> {
     let key = args.key.trim().to_uppercase();
+
+    if args.summary.is_none() && args.description.is_none() && args.priority.is_none() {
+        println!(
+            "{} No update fields specified for {}. Provide at least one of -s/--summary, -d/--description, or --priority.",
+            "⚠".yellow().bold(),
+            key.cyan()
+        );
+        return Ok(());
+    }
+
     let desc_doc = args.description.as_deref().map(text_to_adf);
 
     client

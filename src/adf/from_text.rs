@@ -181,7 +181,9 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                 if !current_buf.is_empty() {
                     nodes.push(Node::text(std::mem::take(&mut current_buf)));
                 }
-                nodes.push(Node::text_with_marks(strike_buf, vec![Mark::strike()]));
+                if !strike_buf.is_empty() {
+                    nodes.push(Node::text_with_marks(strike_buf, vec![Mark::strike()]));
+                }
             } else {
                 current_buf.push_str("~~");
                 current_buf.push_str(&strike_buf);
@@ -204,7 +206,9 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                 if !current_buf.is_empty() {
                     nodes.push(Node::text(std::mem::take(&mut current_buf)));
                 }
-                nodes.push(Node::text_with_marks(code_buf, vec![Mark::code()]));
+                if !code_buf.is_empty() {
+                    nodes.push(Node::text_with_marks(code_buf, vec![Mark::code()]));
+                }
             } else {
                 current_buf.push('`');
                 current_buf.push_str(&code_buf);
@@ -231,7 +235,9 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     if !current_buf.is_empty() {
                         nodes.push(Node::text(std::mem::take(&mut current_buf)));
                     }
-                    nodes.push(Node::text_with_marks(bold_buf, vec![Mark::strong()]));
+                    if !bold_buf.is_empty() {
+                        nodes.push(Node::text_with_marks(bold_buf, vec![Mark::strong()]));
+                    }
                 } else {
                     current_buf.push(target_char);
                     current_buf.push(target_char);
@@ -251,7 +257,9 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     if !current_buf.is_empty() {
                         nodes.push(Node::text(std::mem::take(&mut current_buf)));
                     }
-                    nodes.push(Node::text_with_marks(italic_buf, vec![Mark::em()]));
+                    if !italic_buf.is_empty() {
+                        nodes.push(Node::text_with_marks(italic_buf, vec![Mark::em()]));
+                    }
                 } else {
                     current_buf.push(target_char);
                     current_buf.push_str(&italic_buf);
@@ -288,7 +296,9 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     if !current_buf.is_empty() {
                         nodes.push(Node::text(std::mem::take(&mut current_buf)));
                     }
-                    nodes.push(Node::text_with_marks(label_buf, vec![Mark::link(url_buf)]));
+                    if !label_buf.is_empty() {
+                        nodes.push(Node::text_with_marks(label_buf, vec![Mark::link(url_buf)]));
+                    }
                     continue;
                 } else {
                     current_buf.push('[');
@@ -399,5 +409,21 @@ mod tests {
             doc.content[0].content.is_empty(),
             "Empty paragraph must have no child text nodes"
         );
+    }
+
+    #[test]
+    fn test_text_to_adf_empty_formatting_tags_no_empty_text_nodes() {
+        let input = "Empty **** tags ```` and ~~~~ should not emit empty text";
+        let doc = text_to_adf(input);
+        for block in &doc.content {
+            for inline in &block.content {
+                if let Some(t) = &inline.text {
+                    assert!(
+                        !t.is_empty(),
+                        "ADF schema violation: text nodes must have minLength 1"
+                    );
+                }
+            }
+        }
     }
 }
