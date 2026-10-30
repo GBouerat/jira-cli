@@ -1,0 +1,44 @@
+[package]
+name = "jira-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["Guillaume Bouérat"]
+description = "A modern, developer-friendly Jira Cloud CLI built in Rust using Jira REST API v3"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/GBouerat/jira-cli"
+homepage = "https://github.com/GBouerat/jira-cli"
+readme = "README.md"
+keywords = ["jira", "cli", "atlassian", "developer-tools", "productivity"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "jira"
+path = "src/main.rs"
+
+[lib]
+name = "jira_cli"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo", "env"] }
+clap_complete = "4.5"
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+comfy-table = { version = "7.1", features = ["custom_styling"] }
+colored = "2.1"
+thiserror = "1.0"
+inquire = "0.7"
+url = "2.5"
+dirs = "5.0"
+open = "5.3"
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+
+[dev-dependencies]
+wiremock = "0.6"
+tempfile = "3.12"
+assert_cmd = "2.0"
+predicates = "3.1"
+serial_test = "3.1"
