@@ -197,7 +197,12 @@ pub fn render_issue_detail(issue: &Issue, instance_url: &str) -> String {
                     .unwrap_or("Anonymous");
                 let created = comment.created.as_deref().unwrap_or("");
 
-                out.push_str(&format!("{} {}\n", author.bold().blue(), created.dimmed()));
+                out.push_str(&format!(
+                    "[{}] {} {}\n",
+                    comment.id.yellow().bold(),
+                    author.bold().blue(),
+                    created.dimmed()
+                ));
 
                 if let Some(body) = &comment.body {
                     let body_text = adf_to_terminal(body, true);
@@ -236,6 +241,9 @@ mod tests {
                 comment: None,
                 attachment: None,
                 issuelinks: None,
+                project: None,
+                subtasks: None,
+                parent: None,
                 labels: vec![],
             },
         };

@@ -4,6 +4,7 @@
 //! defines global execution options (profiles, formatters, overrides), and declares
 //! all primary subcommands.
 
+use crate::cli::api::ApiArgs;
 use crate::cli::completions::CompletionsArgs;
 use crate::cli::config::ConfigArgs;
 use crate::cli::issue::IssueArgs;
@@ -90,4 +91,7 @@ pub enum Commands {
 
     /// Generate shell completions (bash, zsh).
     Completions(CompletionsArgs),
+
+    /// Direct raw Jira Cloud REST API request.
+    Api(ApiArgs),
 }

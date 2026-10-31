@@ -4,7 +4,9 @@
 //! width calculations and perfect border alignment. Styling is applied exclusively
 //! via [`comfy_table::Cell::fg`] and [`comfy_table::Cell::add_attribute`].
 
-use crate::client::issue::{Attachment, Changelog, Issue, IssueLink, Transition, Watchers};
+use crate::client::issue::{
+    Attachment, Changelog, Comment, Issue, IssueLink, Transition, Watchers,
+};
 use crate::client::project::{Component, Project, Version};
 use crate::client::sprint::{Board, Sprint};
 use comfy_table::modifiers::UTF8_ROUND_CORNERS;
@@ -416,6 +418,58 @@ pub fn render_watchers_table(watchers: &Watchers) -> String {
     table.to_string()
 }
 
+/// Renders a list of comments into a formatted terminal table including comment IDs.
+pub fn render_comments_table(comments: &[Comment]) -> String {
+    if comments.is_empty() {
+        return "No comments found on this issue.".to_string();
+    }
+
+    let mut table = create_styled_table();
+    table.set_header(vec![
+        Cell::new("ID")
+            .add_attribute(Attribute::Bold)
+            .fg(Color::Cyan),
+        Cell::new("AUTHOR").add_attribute(Attribute::Bold),
+        Cell::new("CREATED").add_attribute(Attribute::Bold),
+        Cell::new("BODY").add_attribute(Attribute::Bold),
+    ]);
+
+    for comment in comments {
+        let id_cell = Cell::new(&comment.id)
+            .fg(Color::Cyan)
+            .add_attribute(Attribute::Bold);
+
+        let author_name = comment
+            .author
+            .as_ref()
+            .map(|u| u.display_name.as_str())
+            .unwrap_or("Anonymous");
+        let author_cell = Cell::new(author_name);
+
+        let created_str = comment.created.as_deref().unwrap_or("-");
+        let created_cell = Cell::new(created_str);
+
+        let body_preview = if let Some(ref body) = comment.body {
+            let rendered = crate::adf::adf_to_terminal(body, false);
+            let first_line = rendered.lines().next().unwrap_or("").trim();
+            if first_line.len() > 60 {
+                format!("{}...", &first_line[..57])
+            } else if first_line.is_empty() {
+                "-".to_string()
+            } else {
+                first_line.to_string()
+            }
+        } else {
+            "-".to_string()
+        };
+        let body_cell = Cell::new(body_preview);
+
+        table.add_row(vec![id_cell, author_cell, created_cell, body_cell]);
+    }
+
+    table.to_string()
+}
+
 /// Renders changelog history records into a terminal table.
 pub fn render_changelog_table(changelogs: &[Changelog]) -> String {
     if changelogs.is_empty() {
@@ -576,6 +630,9 @@ mod tests {
                 comment: None,
                 attachment: None,
                 issuelinks: None,
+                project: None,
+                subtasks: None,
+                parent: None,
                 labels: vec![],
             },
         };

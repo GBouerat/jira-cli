@@ -65,6 +65,15 @@ pub struct IssueFields {
 
     /// Associated issue relationships.
     pub issuelinks: Option<Vec<IssueLink>>,
+
+    /// Project containing the issue.
+    pub project: Option<crate::client::project::Project>,
+
+    /// Child subtasks belonging to this issue.
+    pub subtasks: Option<Vec<LinkedIssue>>,
+
+    /// Parent issue if this issue is a subtask.
+    pub parent: Option<LinkedIssue>,
 }
 
 /// Workflow status of an issue.
@@ -419,6 +428,29 @@ pub struct ChangelogResponse {
     /// Total count of history records.
     #[serde(default)]
     pub total: u64,
+}
+
+/// Response returned by `/rest/api/3/issue/createmeta/{projectIdOrKey}/issuetypes`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CreateMetaIssueTypesResponse {
+    /// Issue types returned in the `values` array.
+    #[serde(default)]
+    pub values: Vec<IssueType>,
+
+    /// Fallback issue types returned in the `issueTypes` array.
+    #[serde(rename = "issueTypes", default)]
+    pub issue_types: Vec<IssueType>,
+}
+
+impl CreateMetaIssueTypesResponse {
+    /// Extracts the list of issue types.
+    pub fn into_issue_types(self) -> Vec<IssueType> {
+        if !self.values.is_empty() {
+            self.values
+        } else {
+            self.issue_types
+        }
+    }
 }
 
 #[cfg(test)]

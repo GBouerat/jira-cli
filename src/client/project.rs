@@ -15,6 +15,7 @@ pub struct Project {
     pub key: String,
 
     /// Full project name.
+    #[serde(default)]
     pub name: String,
 
     /// Project type key (e.g., `software`, `business`, `service_desk`).

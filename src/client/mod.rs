@@ -13,9 +13,10 @@ pub mod sprint;
 use crate::adf::ast::DocNode;
 use crate::client::auth::{build_basic_auth_header, build_user_agent_header};
 use crate::client::issue::{
-    Attachment, Changelog, ChangelogResponse, Comment, CommentsResponse, CreatedIssue, Issue,
-    IssueLink, IssueLinkType, IssueLinkTypesResponse, SearchResults, Transition,
-    TransitionsResponse, User, Watchers, Worklog,
+    Attachment, Changelog, ChangelogResponse, Comment, CommentsResponse,
+    CreateMetaIssueTypesResponse, CreatedIssue, Issue, IssueLink, IssueLinkType,
+    IssueLinkTypesResponse, IssueType, SearchResults, Transition, TransitionsResponse, User,
+    Watchers, Worklog,
 };
 use crate::client::middleware::handle_response_errors;
 use crate::client::project::{Component, Project, Version};
@@ -199,9 +200,49 @@ impl JiraClient {
         let endpoint = format!("/rest/api/3/issue/{}", clean_key);
         let req = self.request(Method::GET, &endpoint).query(&[(
             "fields",
-            "summary,status,issuetype,priority,assignee,reporter,created,updated,description,comment,labels,attachment,issuelinks",
+            "summary,status,issuetype,priority,assignee,reporter,created,updated,description,comment,labels,attachment,issuelinks,project,subtasks,parent",
         )]);
         self.execute_json(req).await
+    }
+
+    /// Fetches an issue with a customized comma-separated list of fields.
+    pub async fn get_issue_with_fields(&self, issue_key: &str, fields: &str) -> Result<Issue> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
+        let req = self
+            .request(Method::GET, &endpoint)
+            .query(&[("fields", fields)]);
+        self.execute_json(req).await
+    }
+
+    /// Fetches available creation metadata issue types for a project.
+    pub async fn get_create_meta_issue_types(&self, project_key: &str) -> Result<Vec<IssueType>> {
+        let clean_key = project_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/createmeta/{}/issuetypes", clean_key);
+        let req = self.request(Method::GET, &endpoint);
+        let resp: CreateMetaIssueTypesResponse = self.execute_json(req).await?;
+        Ok(resp.into_issue_types())
+    }
+
+    /// Creates a Jira issue from an arbitrary JSON payload.
+    pub async fn create_issue_raw(&self, payload: &serde_json::Value) -> Result<CreatedIssue> {
+        let req = self
+            .request(Method::POST, "/rest/api/3/issue")
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(payload);
+        self.execute_json(req).await
+    }
+
+    /// Updates an existing Jira issue from an arbitrary JSON payload (`{"fields": ..., "update": ...}`).
+    pub async fn edit_issue_raw(&self, issue_key: &str, payload: &serde_json::Value) -> Result<()> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!("/rest/api/3/issue/{}", clean_key);
+        let req = self
+            .request(Method::PUT, &endpoint)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(payload);
+        self.execute(req).await?;
+        Ok(())
     }
 
     /// Creates a new Jira issue using REST API v3 with an optional ADF description.
@@ -353,6 +394,62 @@ impl JiraClient {
             .json(&payload);
 
         self.execute_json(req).await
+    }
+
+    /// Fetches a specific comment by ID.
+    pub async fn get_comment(&self, issue_key: &str, comment_id: &str) -> Result<Comment> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!(
+            "/rest/api/3/issue/{}/comment/{}",
+            clean_key,
+            comment_id.trim()
+        );
+        let req = self.request(Method::GET, &endpoint);
+        self.execute_json(req).await
+    }
+
+    /// Updates an existing comment with a new ADF body.
+    pub async fn edit_comment(
+        &self,
+        issue_key: &str,
+        comment_id: &str,
+        body: &DocNode,
+    ) -> Result<Comment> {
+        let payload = json!({ "body": body });
+        self.edit_comment_raw(issue_key, comment_id, &payload).await
+    }
+
+    /// Updates an existing comment using a raw JSON payload (e.g. `{"body": <ADF>}`).
+    pub async fn edit_comment_raw(
+        &self,
+        issue_key: &str,
+        comment_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Comment> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!(
+            "/rest/api/3/issue/{}/comment/{}",
+            clean_key,
+            comment_id.trim()
+        );
+        let req = self
+            .request(Method::PUT, &endpoint)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(payload);
+        self.execute_json(req).await
+    }
+
+    /// Deletes a comment by ID.
+    pub async fn delete_comment(&self, issue_key: &str, comment_id: &str) -> Result<()> {
+        let clean_key = issue_key.trim().to_uppercase();
+        let endpoint = format!(
+            "/rest/api/3/issue/{}/comment/{}",
+            clean_key,
+            comment_id.trim()
+        );
+        let req = self.request(Method::DELETE, &endpoint);
+        self.execute(req).await?;
+        Ok(())
     }
 
     /// Logs work on an issue.
@@ -636,5 +733,21 @@ impl JiraClient {
         let endpoint = format!("/rest/agile/1.0/sprint/{}/issue", sprint_id);
         let req = self.request(Method::GET, &endpoint);
         self.execute_json(req).await
+    }
+
+    /// Performs an arbitrary raw HTTP request against Jira Cloud with standard auth and retry logic.
+    pub async fn raw_api_call(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<Response> {
+        let mut req = self.request(method, path);
+        if let Some(b) = body {
+            req = req
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .json(b);
+        }
+        self.execute(req).await
     }
 }

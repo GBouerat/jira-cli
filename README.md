@@ -101,7 +101,7 @@ jira issue view DEV-101
 
 #### Create an Issue
 
-Create interactively or passing all arguments directly:
+Create interactively, passing flags directly, or reading descriptions from files/stdin:
 
 ```bash
 # Interactive prompts
@@ -115,12 +115,79 @@ jira issue create \
   -d "### Root Cause\nThe worker does not flush the channel buffer on termination.\n\n- [ ] Add flush call\n- [ ] Verify test suite" \
   --priority High \
   --assignee @me
+
+# Create subtask under a parent issue (automatically uses project's subtask type and parent's project)
+jira issue create --parent DEV-100 -s "Implement backend migration"
+
+# Description from a file or stdin (-f / --body-file)
+jira issue create -P DEV -s "Implement OAuth2 flow" -f ./specs/oauth2.md
+
+# Set labels and arbitrary / custom fields (JSON parsed if valid, else string)
+jira issue create \
+  -P DEV \
+  -s "Add enterprise telemetry" \
+  --label telemetry \
+  --label enterprise \
+  --field customfield_16375=N/A \
+  --field 'components=[{"name":"Telemetry"}]'
+
+# Preview request payload without creating (--dry-run)
+jira issue create -P DEV -s "Test task" --dry-run
 ```
 
 #### Edit an Issue
 
 ```bash
+# Update summary, priority, or description
 jira issue edit DEV-101 -s "New summary title" --priority Highest
+
+# Description from a Markdown file or stdin
+jira issue edit DEV-101 -f ./notes/update.md
+
+# Replace all labels
+jira issue edit DEV-101 --label frontend --label v2
+
+# Add or remove specific labels using update verbs
+jira issue edit DEV-101 --add-label approved --remove-label needs-review
+
+# Update arbitrary / custom fields
+jira issue edit DEV-101 --field customfield_10010=42 --field customfield_16375="N/A"
+
+# Preview update payload without sending (--dry-run)
+jira issue edit DEV-101 --add-label hotfix --dry-run
+```
+
+#### Batch Create Subtasks from a File
+
+Batch-create subtasks under a parent issue from a JSON file. Entries whose summary already exists as a subtask on the parent are automatically skipped, allowing safe reruns after failures:
+
+```bash
+# subtasks.json:
+# [
+#   { "summary": "Design database schema", "description": "Markdown specs...", "priority": "High" },
+#   { "summary": "Implement repository layer", "description": "CRUD operations" }
+# ]
+
+jira issue create-subtasks DEV-100 subtasks.json
+
+# Limit maximum creations (e.g. create one to test rendering before proceeding)
+jira issue create-subtasks DEV-100 subtasks.json --limit 1
+
+# Apply common labels and custom fields to all created subtasks
+jira issue create-subtasks DEV-100 subtasks.json \
+  -l sprint-42 \
+  --field customfield_16375=N/A
+
+# Dry run to inspect payloads without creating
+jira issue create-subtasks DEV-100 subtasks.json --dry-run
+```
+
+#### Multi-Issue Priority
+
+Update the priority of multiple issues in a single invocation:
+
+```bash
+jira issue set-priority Blocker DEV-101 DEV-102 DEV-103
 ```
 
 #### Assign an Issue
@@ -152,11 +219,36 @@ jira issue transition DEV-101 Done -m "Resolved in release v1.4.0"
 #### Comments & Worklogs
 
 ```bash
-# List comments on an issue
+# List comments on an issue (displays comment IDs in terminal tables, text, and JSON)
 jira issue comment DEV-101
 
-# Add a comment (supports Markdown)
+# Add a comment with inline Markdown
 jira issue comment DEV-101 "Investigating this issue now. See commit `a1b2c3d`."
+
+# Add a comment from a Markdown file or stdin (-f / --body-file)
+jira issue comment DEV-101 -f ./notes/analysis.md
+cat ./notes/analysis.md | jira issue comment DEV-101 -f -
+
+# Retrieve a single comment by ID
+jira issue comment-get DEV-101 10050
+
+# Output raw ADF body untouched (ideal for scripts to rewrite and send back)
+jira issue comment-get DEV-101 10050 -o json > comment_adf.json
+
+# Edit comment from Markdown (compiled to ADF)
+jira issue comment-edit DEV-101 10050 -f ./notes/updated_comment.md
+
+# Edit comment from raw ADF JSON (sent untouched without lossy markdown round-tripping)
+jira issue comment-edit DEV-101 10050 --adf comment_adf.json
+
+# Preview comment edit payload without sending (--dry-run)
+jira issue comment-edit DEV-101 10050 -f ./notes/updated_comment.md --dry-run
+
+# Delete a comment permanently (prompts for confirmation)
+jira issue comment-delete DEV-101 10050
+
+# Delete comment skipping confirmation prompt (-y)
+jira issue comment-delete DEV-101 10050 -y
 
 # Log time spent
 jira issue worklog DEV-101 "2h 30m" -m "Implemented unit and integration tests"
@@ -270,6 +362,28 @@ jira project create-version DEV --name "v2.0.0" --description "Major release" --
 
 # List project components
 jira project components DEV
+```
+
+---
+
+### Direct Raw REST API Access (`jira api`)
+
+Perform arbitrary REST API calls against Jira Cloud while reusing the active profile's authentication, User-Agent, base URL resolution, and automatic HTTP 429 rate-limit backoff. PATH is relative to `/rest/api/3` unless it starts with `/rest/` or an absolute URL:
+
+```bash
+# Query any REST API v3 resource (relative path)
+jira api GET issue/DEV-101
+
+# Query Jira Agile API
+jira api GET /rest/agile/1.0/board
+
+# POST request with JSON body from a file
+jira api POST issue/DEV-101/worklog -f ./payload.json
+
+# POST request with JSON body from standard input
+echo '{"timeSpent": "1h 30m"}' | jira api POST issue/DEV-101/worklog -f -
+
+# Errors return non-zero exit codes with Jira's error payload printed to stderr
 ```
 
 ---

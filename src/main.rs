@@ -7,8 +7,8 @@ use clap::{CommandFactory, Parser};
 use colored::Colorize;
 use jira_cli::cli::args::{Cli, Commands};
 use jira_cli::cli::{
-    handle_config_command, handle_issue_command, handle_project_command, handle_sprint_command,
-    run_completions,
+    handle_api_command, handle_config_command, handle_issue_command, handle_project_command,
+    handle_sprint_command, run_completions,
 };
 use jira_cli::client::JiraClient;
 use jira_cli::config::{load_config, resolve_credentials};
@@ -66,6 +66,9 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Commands::Project(project_args) => {
             handle_project_command(project_args, &client, cli.output).await?;
+        }
+        Commands::Api(api_args) => {
+            handle_api_command(api_args, &client).await?;
         }
         Commands::Config(_) | Commands::Completions(_) => unreachable!(),
     }

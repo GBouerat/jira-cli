@@ -178,9 +178,7 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                 strike_buf.push(next_c);
             }
             if closed {
-                if !current_buf.is_empty() {
-                    nodes.push(Node::text(std::mem::take(&mut current_buf)));
-                }
+                push_text_with_autolinks(std::mem::take(&mut current_buf), &mut nodes);
                 if !strike_buf.is_empty() {
                     nodes.push(Node::text_with_marks(strike_buf, vec![Mark::strike()]));
                 }
@@ -203,9 +201,7 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                 code_buf.push(next_c);
             }
             if closed {
-                if !current_buf.is_empty() {
-                    nodes.push(Node::text(std::mem::take(&mut current_buf)));
-                }
+                push_text_with_autolinks(std::mem::take(&mut current_buf), &mut nodes);
                 if !code_buf.is_empty() {
                     nodes.push(Node::text_with_marks(code_buf, vec![Mark::code()]));
                 }
@@ -232,9 +228,7 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     bold_buf.push(next_c);
                 }
                 if closed {
-                    if !current_buf.is_empty() {
-                        nodes.push(Node::text(std::mem::take(&mut current_buf)));
-                    }
+                    push_text_with_autolinks(std::mem::take(&mut current_buf), &mut nodes);
                     if !bold_buf.is_empty() {
                         nodes.push(Node::text_with_marks(bold_buf, vec![Mark::strong()]));
                     }
@@ -254,9 +248,7 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                     italic_buf.push(next_c);
                 }
                 if closed {
-                    if !current_buf.is_empty() {
-                        nodes.push(Node::text(std::mem::take(&mut current_buf)));
-                    }
+                    push_text_with_autolinks(std::mem::take(&mut current_buf), &mut nodes);
                     if !italic_buf.is_empty() {
                         nodes.push(Node::text_with_marks(italic_buf, vec![Mark::em()]));
                     }
@@ -293,9 +285,7 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
                 }
 
                 if closed_paren {
-                    if !current_buf.is_empty() {
-                        nodes.push(Node::text(std::mem::take(&mut current_buf)));
-                    }
+                    push_text_with_autolinks(std::mem::take(&mut current_buf), &mut nodes);
                     if !label_buf.is_empty() {
                         nodes.push(Node::text_with_marks(label_buf, vec![Mark::link(url_buf)]));
                     }
@@ -321,10 +311,63 @@ pub fn parse_inline(text: &str) -> Vec<Node> {
     }
 
     if !current_buf.is_empty() {
-        nodes.push(Node::text(current_buf));
+        push_text_with_autolinks(current_buf, &mut nodes);
     }
 
     nodes
+}
+
+/// Emits text into `nodes`, converting bare URLs (`http://` or `https://`) into linked text nodes.
+fn push_text_with_autolinks(text: String, nodes: &mut Vec<Node>) {
+    if text.is_empty() {
+        return;
+    }
+
+    let mut remaining = text.as_str();
+    while let Some(rel_idx) = find_url_scheme(remaining) {
+        let (before, from_url) = remaining.split_at(rel_idx);
+        if !before.is_empty() {
+            nodes.push(Node::text(before.to_string()));
+        }
+
+        let raw_url_len = from_url
+            .find(|c: char| c.is_whitespace() || c == '<' || c == '>' || c == '"' || c == '\'')
+            .unwrap_or(from_url.len());
+
+        let mut url_candidate = &from_url[..raw_url_len];
+        while url_candidate.ends_with('.')
+            || url_candidate.ends_with(',')
+            || url_candidate.ends_with(';')
+            || url_candidate.ends_with('!')
+            || url_candidate.ends_with('?')
+        {
+            url_candidate = &url_candidate[..url_candidate.len() - 1];
+        }
+
+        if !url_candidate.is_empty() {
+            nodes.push(Node::text_with_marks(
+                url_candidate.to_string(),
+                vec![Mark::link(url_candidate.to_string())],
+            ));
+        }
+
+        remaining = &from_url[url_candidate.len()..];
+    }
+
+    if !remaining.is_empty() {
+        nodes.push(Node::text(remaining.to_string()));
+    }
+}
+
+fn find_url_scheme(s: &str) -> Option<usize> {
+    let http = s.find("http://");
+    let https = s.find("https://");
+    match (http, https) {
+        (Some(h), Some(hs)) => Some(h.min(hs)),
+        (Some(h), None) => Some(h),
+        (None, Some(hs)) => Some(hs),
+        (None, None) => None,
+    }
 }
 
 #[cfg(test)]
@@ -425,5 +468,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_text_to_adf_bare_urls_become_link_marks() {
+        let input =
+            "Check https://jira.atlassian.com/browse/DEV-1 for details or http://example.com/test.";
+        let doc = text_to_adf(input);
+        let p = &doc.content[0].content;
+
+        // "Check "
+        assert_eq!(p[0].text.as_deref(), Some("Check "));
+        assert!(p[0].marks.is_empty());
+
+        // "https://jira.atlassian.com/browse/DEV-1"
+        assert_eq!(
+            p[1].text.as_deref(),
+            Some("https://jira.atlassian.com/browse/DEV-1")
+        );
+        assert_eq!(p[1].marks.len(), 1);
+        assert_eq!(p[1].marks[0].mark_type, "link");
+        assert_eq!(
+            p[1].marks[0].attrs.as_ref().unwrap().get("href").unwrap(),
+            "https://jira.atlassian.com/browse/DEV-1"
+        );
+
+        // " for details or "
+        assert_eq!(p[2].text.as_deref(), Some(" for details or "));
+
+        // "http://example.com/test"
+        assert_eq!(p[3].text.as_deref(), Some("http://example.com/test"));
+        assert_eq!(p[3].marks.len(), 1);
+        assert_eq!(p[3].marks[0].mark_type, "link");
+
+        // "."
+        assert_eq!(p[4].text.as_deref(), Some("."));
     }
 }

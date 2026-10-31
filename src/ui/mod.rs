@@ -11,6 +11,7 @@ pub use detail::render_issue_detail;
 pub use format::OutputMode;
 pub use table::{
     format_file_size, render_attachments_table, render_boards_table, render_changelog_table,
-    render_components_table, render_issue_links_table, render_issues_table, render_projects_table,
-    render_sprints_table, render_transitions_table, render_versions_table, render_watchers_table,
+    render_comments_table, render_components_table, render_issue_links_table, render_issues_table,
+    render_projects_table, render_sprints_table, render_transitions_table, render_versions_table,
+    render_watchers_table,
 };

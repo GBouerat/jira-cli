@@ -4,15 +4,17 @@
 //! commenting, time logging, and browser launching for Jira issues.
 
 use crate::adf::from_text::text_to_adf;
+use crate::cli::api::read_file_or_stdin;
 use crate::client::JiraClient;
 use crate::error::{JiraError, Result};
 use crate::ui::format::OutputMode;
 use crate::ui::{
-    render_attachments_table, render_changelog_table, render_issue_detail,
+    render_attachments_table, render_changelog_table, render_comments_table, render_issue_detail,
     render_issue_links_table, render_issues_table, render_transitions_table, render_watchers_table,
 };
 use clap::{Args, Subcommand};
 use colored::Colorize;
+use std::collections::HashSet;
 
 /// Issue management commands.
 #[derive(Debug, Clone, Args)]
@@ -48,6 +50,26 @@ pub enum IssueSubcommand {
 
     /// Add a comment to an issue or list comments.
     Comment(IssueCommentArgs),
+
+    /// Fetch a single comment and optionally output its raw ADF body.
+    #[command(name = "comment-get")]
+    CommentGet(IssueCommentGetArgs),
+
+    /// Edit an existing comment using Markdown or raw ADF JSON.
+    #[command(name = "comment-edit")]
+    CommentEdit(IssueCommentEditArgs),
+
+    /// Delete a comment from an issue permanently.
+    #[command(name = "comment-delete")]
+    CommentDelete(IssueCommentDeleteArgs),
+
+    /// Batch create subtasks under a parent issue from a JSON file.
+    #[command(name = "create-subtasks")]
+    CreateSubtasks(IssueCreateSubtasksArgs),
+
+    /// Set priority across one or more issues.
+    #[command(name = "set-priority")]
+    SetPriority(IssueSetPriorityArgs),
 
     /// Log work time spent on an issue (e.g., '2h 30m').
     Worklog(IssueWorklogArgs),
@@ -133,6 +155,10 @@ pub struct IssueCreateArgs {
     #[arg(short, long)]
     pub description: Option<String>,
 
+    /// Path to Markdown file containing description ('-' for stdin).
+    #[arg(short = 'f', long = "body-file", conflicts_with = "description")]
+    pub body_file: Option<String>,
+
     /// Priority name (e.g. 'High', 'Medium', 'Low').
     #[arg(long)]
     pub priority: Option<String>,
@@ -140,6 +166,22 @@ pub struct IssueCreateArgs {
     /// Assignee email, query, or '@me'.
     #[arg(short, long)]
     pub assignee: Option<String>,
+
+    /// Parent issue key to associate as a subtask.
+    #[arg(long)]
+    pub parent: Option<String>,
+
+    /// Labels to assign to the issue (repeatable).
+    #[arg(short = 'l', long = "label", action = clap::ArgAction::Append)]
+    pub labels: Vec<String>,
+
+    /// Custom or arbitrary fields to set in NAME=VALUE format (repeatable).
+    #[arg(long = "field", action = clap::ArgAction::Append)]
+    pub fields: Vec<String>,
+
+    /// Output the payload without creating the issue.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 /// Arguments for `jira issue edit <KEY>`.
@@ -156,9 +198,33 @@ pub struct IssueEditArgs {
     #[arg(short, long)]
     pub description: Option<String>,
 
+    /// Path to Markdown file containing updated description ('-' for stdin).
+    #[arg(short = 'f', long = "body-file", conflicts_with = "description")]
+    pub body_file: Option<String>,
+
     /// New priority.
     #[arg(long)]
     pub priority: Option<String>,
+
+    /// Replace all issue labels with the provided list (repeatable).
+    #[arg(short = 'l', long = "label", action = clap::ArgAction::Append, conflicts_with_all = ["add_labels", "remove_labels"])]
+    pub labels: Vec<String>,
+
+    /// Add specific labels using update verb (repeatable).
+    #[arg(long = "add-label", action = clap::ArgAction::Append)]
+    pub add_labels: Vec<String>,
+
+    /// Remove specific labels using update verb (repeatable).
+    #[arg(long = "remove-label", action = clap::ArgAction::Append)]
+    pub remove_labels: Vec<String>,
+
+    /// Custom or arbitrary fields to set in NAME=VALUE format (repeatable).
+    #[arg(long = "field", action = clap::ArgAction::Append)]
+    pub fields: Vec<String>,
+
+    /// Output the payload without making update requests.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 /// Arguments for `jira issue assign <KEY> [USER]`.
@@ -197,6 +263,112 @@ pub struct IssueCommentArgs {
 
     /// Comment text in Markdown (compiled to ADF). If omitted, lists comments.
     pub message: Option<String>,
+
+    /// Path to Markdown file containing comment text ('-' for stdin).
+    #[arg(short = 'f', long = "body-file", conflicts_with = "message")]
+    pub body_file: Option<String>,
+}
+
+/// Arguments for `jira issue comment-get <KEY> <COMMENT_ID>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueCommentGetArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Unique comment ID to retrieve.
+    pub comment_id: String,
+}
+
+/// Arguments for `jira issue comment-edit <KEY> <COMMENT_ID>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueCommentEditArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Unique comment ID to edit.
+    pub comment_id: String,
+
+    /// Comment text in Markdown.
+    #[arg(short = 'm', long = "message")]
+    pub message: Option<String>,
+
+    /// Path to file containing Markdown body ('-' for stdin).
+    #[arg(short = 'f', long = "body-file", conflicts_with = "message")]
+    pub body_file: Option<String>,
+
+    /// Path to file containing raw ADF JSON sent untouched ('-' for stdin).
+    #[arg(long = "adf", conflicts_with_all = ["message", "body_file"])]
+    pub adf: Option<String>,
+
+    /// Output the payload without making the request.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
+}
+
+/// Arguments for `jira issue comment-delete <KEY> <COMMENT_ID>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueCommentDeleteArgs {
+    /// Issue key or ID (e.g. PROJ-123).
+    pub key: String,
+
+    /// Unique comment ID to delete.
+    pub comment_id: String,
+
+    /// Skip confirmation prompt.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+}
+
+/// Arguments for `jira issue create-subtasks <PARENT> <FILE>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueCreateSubtasksArgs {
+    /// Parent issue key (e.g. PROJ-123).
+    pub parent: String,
+
+    /// Path to JSON file containing array of subtask objects ('-' for stdin).
+    pub file: String,
+
+    /// Maximum number of subtasks to create.
+    #[arg(long)]
+    pub limit: Option<usize>,
+
+    /// Optional labels to attach to each created subtask (repeatable).
+    #[arg(short = 'l', long = "label", action = clap::ArgAction::Append)]
+    pub labels: Vec<String>,
+
+    /// Custom or arbitrary fields to set in NAME=VALUE format (repeatable).
+    #[arg(long = "field", action = clap::ArgAction::Append)]
+    pub fields: Vec<String>,
+
+    /// Output the payload without creating any subtasks.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
+}
+
+/// Arguments for `jira issue set-priority <PRIORITY> <KEYS...>`.
+#[derive(Debug, Clone, Args)]
+pub struct IssueSetPriorityArgs {
+    /// Target priority name (e.g. 'High', 'Medium', 'Low').
+    pub priority: String,
+
+    /// One or more issue keys to update (e.g. PROJ-101 PROJ-102).
+    #[arg(required = true)]
+    pub keys: Vec<String>,
+}
+
+/// Individual subtask representation within a batch create JSON file.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SubtaskEntry {
+    /// Subtask summary / title.
+    pub summary: String,
+
+    /// Optional subtask description in Markdown.
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Optional subtask priority name.
+    #[serde(default)]
+    pub priority: Option<String>,
 }
 
 /// Arguments for `jira issue worklog <KEY> <TIME>`.
@@ -268,6 +440,10 @@ pub struct IssueLinkArgs {
     /// Optional comment explaining the relationship.
     #[arg(short = 'm', long)]
     pub comment: Option<String>,
+
+    /// Path to Markdown file containing link comment ('-' for stdin).
+    #[arg(short = 'f', long = "body-file", conflicts_with = "comment")]
+    pub body_file: Option<String>,
 }
 
 /// Arguments for `jira issue links <KEY>`.
@@ -337,13 +513,30 @@ pub async fn handle_issue_command(
         }
         IssueSubcommand::View(view_args) => handle_view(view_args, client, output_mode).await,
         IssueSubcommand::Create(create_args) => {
-            handle_create(create_args, client, default_project).await
+            handle_create(create_args, client, output_mode, default_project).await
         }
-        IssueSubcommand::Edit(edit_args) => handle_edit(edit_args, client).await,
+        IssueSubcommand::Edit(edit_args) => handle_edit(edit_args, client, output_mode).await,
         IssueSubcommand::Delete(delete_args) => handle_delete(delete_args, client).await,
         IssueSubcommand::Assign(assign_args) => handle_assign(assign_args, client).await,
         IssueSubcommand::Transition(trans_args) => handle_transition(trans_args, client).await,
-        IssueSubcommand::Comment(comment_args) => handle_comment(comment_args, client).await,
+        IssueSubcommand::Comment(comment_args) => {
+            handle_comment(comment_args, client, output_mode).await
+        }
+        IssueSubcommand::CommentGet(comment_get_args) => {
+            handle_comment_get(comment_get_args, client, output_mode).await
+        }
+        IssueSubcommand::CommentEdit(comment_edit_args) => {
+            handle_comment_edit(comment_edit_args, client, output_mode).await
+        }
+        IssueSubcommand::CommentDelete(comment_delete_args) => {
+            handle_comment_delete(comment_delete_args, client, output_mode).await
+        }
+        IssueSubcommand::CreateSubtasks(subtasks_args) => {
+            handle_create_subtasks(subtasks_args, client, output_mode).await
+        }
+        IssueSubcommand::SetPriority(priority_args) => {
+            handle_set_priority(priority_args, client, output_mode).await
+        }
         IssueSubcommand::Worklog(worklog_args) => handle_worklog(worklog_args, client).await,
         IssueSubcommand::Open(open_args) => handle_open(open_args, client),
         IssueSubcommand::Attach(attach_args) => {
@@ -471,22 +664,74 @@ async fn handle_view(
     Ok(())
 }
 
+/// Parses a "NAME=VALUE" field definition, converting VALUE into JSON if valid JSON, otherwise string.
+pub fn parse_custom_field(pair: &str) -> Result<(String, serde_json::Value)> {
+    let parts: Vec<&str> = pair.splitn(2, '=').collect();
+    if parts.len() != 2 {
+        return Err(JiraError::Generic(format!(
+            "Invalid field format '{}'. Expected NAME=VALUE.",
+            pair
+        )));
+    }
+    let name = parts[0].trim().to_string();
+    if name.is_empty() {
+        return Err(JiraError::Generic(format!(
+            "Field name cannot be empty in '{}'.",
+            pair
+        )));
+    }
+    let raw_val = parts[1].trim();
+    let json_val = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw_val) {
+        parsed
+    } else {
+        serde_json::Value::String(raw_val.to_string())
+    };
+    Ok((name, json_val))
+}
+
+/// Resolves the subtask issue type name for a project from createmeta.
+pub async fn resolve_subtask_type(client: &JiraClient, project_key: &str) -> Result<String> {
+    let types = client.get_create_meta_issue_types(project_key).await?;
+    let subtask_type = types.into_iter().find(|t| t.subtask).map(|t| t.name);
+    subtask_type.ok_or_else(|| {
+        JiraError::Generic(format!(
+            "No subtask issue type found for project '{}'",
+            project_key
+        ))
+    })
+}
+
 async fn handle_create(
     args: IssueCreateArgs,
     client: &JiraClient,
+    output_mode: OutputMode,
     default_project: Option<&str>,
 ) -> Result<()> {
-    let project = args
-        .project
-        .or_else(|| default_project.map(|p| p.to_string()))
-        .ok_or_else(|| {
+    let parent_key = args.parent.map(|k| k.trim().to_uppercase());
+
+    let project = if let Some(p) = args.project {
+        p
+    } else if let Some(ref pk) = parent_key {
+        let parent_issue = client.get_issue_with_fields(pk, "project").await?;
+        parent_issue.fields.project.map(|p| p.key).ok_or_else(|| {
+            JiraError::Generic(format!("Could not determine project for parent '{}'", pk))
+        })?
+    } else {
+        default_project.map(|p| p.to_string()).ok_or_else(|| {
             JiraError::Config(
                 "Project key must be specified via --project or default_project in config"
                     .to_string(),
             )
-        })?;
+        })?
+    };
 
-    let issue_type = args.issue_type.unwrap_or_else(|| "Task".to_string());
+    let issue_type = if let Some(it) = args.issue_type {
+        it
+    } else if parent_key.is_some() {
+        resolve_subtask_type(client, &project).await?
+    } else {
+        "Task".to_string()
+    };
 
     let summary = match args.summary {
         Some(s) => s,
@@ -495,7 +740,12 @@ async fn handle_create(
             .map_err(|e| JiraError::Prompt(e.to_string()))?,
     };
 
-    let description_doc = args.description.as_deref().map(text_to_adf);
+    let description_doc = if let Some(ref file_path) = args.body_file {
+        let content = read_file_or_stdin(file_path)?;
+        Some(text_to_adf(&content))
+    } else {
+        args.description.as_deref().map(text_to_adf)
+    };
 
     let assignee_id = if let Some(user_query) = args.assignee {
         if user_query.eq_ignore_ascii_case("@me") {
@@ -509,52 +759,149 @@ async fn handle_create(
         None
     };
 
-    let created = client
-        .create_issue(
-            &project,
-            &issue_type,
-            &summary,
-            description_doc.as_ref(),
-            args.priority.as_deref(),
-            assignee_id.as_deref(),
-        )
-        .await?;
+    let mut fields = serde_json::Map::new();
+    fields.insert("project".to_string(), serde_json::json!({ "key": project }));
+    fields.insert(
+        "issuetype".to_string(),
+        serde_json::json!({ "name": issue_type }),
+    );
+    fields.insert("summary".to_string(), serde_json::json!(summary));
+
+    if let Some(ref desc) = description_doc {
+        fields.insert("description".to_string(), serde_json::to_value(desc)?);
+    }
+    if let Some(ref prio) = args.priority {
+        fields.insert("priority".to_string(), serde_json::json!({ "name": prio }));
+    }
+    if let Some(ref acc_id) = assignee_id {
+        fields.insert(
+            "assignee".to_string(),
+            serde_json::json!({ "accountId": acc_id }),
+        );
+    }
+    if let Some(ref pk) = parent_key {
+        fields.insert("parent".to_string(), serde_json::json!({ "key": pk }));
+    }
+    if !args.labels.is_empty() {
+        fields.insert("labels".to_string(), serde_json::json!(args.labels));
+    }
+    for custom in &args.fields {
+        let (field_name, field_val) = parse_custom_field(custom)?;
+        fields.insert(field_name, field_val);
+    }
+
+    let payload = serde_json::json!({ "fields": fields });
+
+    if args.dry_run {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let created = client.create_issue_raw(&payload).await?;
 
     let issue_url = format!("{}/browse/{}", client.instance_url(), created.key);
-    println!(
-        "{} Created issue {} ({})",
-        "✔".green().bold(),
-        created.key.bold().cyan(),
-        issue_url.dimmed()
-    );
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&created)?);
+        }
+        _ => {
+            println!(
+                "{} Created issue {} ({})",
+                "✔".green().bold(),
+                created.key.bold().cyan(),
+                issue_url.dimmed()
+            );
+        }
+    }
 
     Ok(())
 }
 
-async fn handle_edit(args: IssueEditArgs, client: &JiraClient) -> Result<()> {
+async fn handle_edit(
+    args: IssueEditArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
     let key = args.key.trim().to_uppercase();
 
-    if args.summary.is_none() && args.description.is_none() && args.priority.is_none() {
+    let description_doc = if let Some(ref file_path) = args.body_file {
+        let content = read_file_or_stdin(file_path)?;
+        Some(text_to_adf(&content))
+    } else {
+        args.description.as_deref().map(text_to_adf)
+    };
+
+    let mut fields = serde_json::Map::new();
+    let mut update = serde_json::Map::new();
+
+    if let Some(ref s) = args.summary {
+        fields.insert("summary".to_string(), serde_json::json!(s));
+    }
+    if let Some(ref desc) = description_doc {
+        fields.insert("description".to_string(), serde_json::to_value(desc)?);
+    }
+    if let Some(ref prio) = args.priority {
+        fields.insert("priority".to_string(), serde_json::json!({ "name": prio }));
+    }
+    if !args.labels.is_empty() {
+        fields.insert("labels".to_string(), serde_json::json!(args.labels));
+    }
+    for custom in &args.fields {
+        let (field_name, field_val) = parse_custom_field(custom)?;
+        fields.insert(field_name, field_val);
+    }
+
+    if !args.add_labels.is_empty() || !args.remove_labels.is_empty() {
+        let mut ops = Vec::new();
+        for l in &args.add_labels {
+            ops.push(serde_json::json!({ "add": l }));
+        }
+        for l in &args.remove_labels {
+            ops.push(serde_json::json!({ "remove": l }));
+        }
+        update.insert("labels".to_string(), serde_json::json!(ops));
+    }
+
+    if fields.is_empty() && update.is_empty() {
         println!(
-            "{} No update fields specified for {}. Provide at least one of -s/--summary, -d/--description, or --priority.",
+            "{} No update fields specified for {}. Provide at least one of -s/--summary, -d/--description, -f/--body-file, --priority, --label, --add-label, --remove-label, or --field.",
             "⚠".yellow().bold(),
             key.cyan()
         );
         return Ok(());
     }
 
-    let desc_doc = args.description.as_deref().map(text_to_adf);
+    let mut payload_map = serde_json::Map::new();
+    if !fields.is_empty() {
+        payload_map.insert("fields".to_string(), serde_json::Value::Object(fields));
+    }
+    if !update.is_empty() {
+        payload_map.insert("update".to_string(), serde_json::Value::Object(update));
+    }
+    let payload = serde_json::Value::Object(payload_map);
 
-    client
-        .edit_issue(
-            &key,
-            args.summary.as_deref(),
-            desc_doc.as_ref(),
-            args.priority.as_deref(),
-        )
-        .await?;
+    if args.dry_run {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
 
-    println!("{} Updated issue {}", "✔".green().bold(), key.cyan());
+    client.edit_issue_raw(&key, &payload).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "updated": true,
+                    "key": key
+                })
+            );
+        }
+        _ => {
+            println!("{} Updated issue {}", "✔".green().bold(), key.cyan());
+        }
+    }
+
     Ok(())
 }
 
@@ -634,33 +981,423 @@ async fn handle_transition(args: IssueTransitionArgs, client: &JiraClient) -> Re
     Ok(())
 }
 
-async fn handle_comment(args: IssueCommentArgs, client: &JiraClient) -> Result<()> {
+async fn handle_comment(
+    args: IssueCommentArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
     let key = args.key.trim().to_uppercase();
-    match args.message {
+
+    let comment_body = if let Some(ref file_path) = args.body_file {
+        let content = read_file_or_stdin(file_path)?;
+        Some(content)
+    } else {
+        args.message
+    };
+
+    match comment_body {
         None => {
             let comments = client.get_comments(&key).await?;
-            if comments.comments.is_empty() {
-                println!("No comments on {}.", key.cyan());
-            } else {
-                println!("Comments for {}:\n", key.cyan());
-                for comment in &comments.comments {
-                    let author = comment
-                        .author
-                        .as_ref()
-                        .map(|u| u.display_name.as_str())
-                        .unwrap_or("Anonymous");
-                    let created = comment.created.as_deref().unwrap_or("");
-                    println!("{} {}", author.bold().blue(), created.dimmed());
-                    if let Some(body) = &comment.body {
-                        println!("{}\n", crate::adf::adf_to_terminal(body, true));
+            match output_mode {
+                OutputMode::Json => {
+                    println!("{}", serde_json::to_string_pretty(&comments)?);
+                }
+                OutputMode::Table => {
+                    println!("{}", render_comments_table(&comments.comments));
+                }
+                OutputMode::Markdown => {
+                    println!("| ID | Author | Created |");
+                    println!("| --- | --- | --- |");
+                    for c in &comments.comments {
+                        let author = c
+                            .author
+                            .as_ref()
+                            .map(|u| u.display_name.as_str())
+                            .unwrap_or("Anonymous");
+                        let created = c.created.as_deref().unwrap_or("-");
+                        println!("| {} | {} | {} |", c.id, author, created);
+                    }
+                }
+                OutputMode::Plain => {
+                    if comments.comments.is_empty() {
+                        println!("No comments on {}.", key.cyan());
+                    } else {
+                        println!("Comments for {}:\n", key.cyan());
+                        for comment in &comments.comments {
+                            let author = comment
+                                .author
+                                .as_ref()
+                                .map(|u| u.display_name.as_str())
+                                .unwrap_or("Anonymous");
+                            let created = comment.created.as_deref().unwrap_or("");
+                            println!(
+                                "[ID: {}] {} {}",
+                                comment.id.yellow().bold(),
+                                author.bold().blue(),
+                                created.dimmed()
+                            );
+                            if let Some(body) = &comment.body {
+                                println!("{}\n", crate::adf::adf_to_terminal(body, true));
+                            }
+                        }
                     }
                 }
             }
         }
         Some(msg) => {
             let adf_body = text_to_adf(&msg);
-            client.add_comment(&key, &adf_body).await?;
-            println!("{} Added comment to {}", "✔".green().bold(), key.cyan());
+            let created_comment = client.add_comment(&key, &adf_body).await?;
+            match output_mode {
+                OutputMode::Json => {
+                    println!("{}", serde_json::to_string_pretty(&created_comment)?);
+                }
+                _ => {
+                    println!(
+                        "{} Added comment (ID: {}) to {}",
+                        "✔".green().bold(),
+                        created_comment.id.cyan(),
+                        key.cyan()
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_comment_get(
+    args: IssueCommentGetArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let comment = client.get_comment(&key, &args.comment_id).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            if let Some(ref body) = comment.body {
+                println!("{}", serde_json::to_string_pretty(body)?);
+            } else {
+                println!("null");
+            }
+        }
+        OutputMode::Table | OutputMode::Plain | OutputMode::Markdown => {
+            let author = comment
+                .author
+                .as_ref()
+                .map(|u| u.display_name.as_str())
+                .unwrap_or("Anonymous");
+            let created = comment.created.as_deref().unwrap_or("");
+            println!(
+                "[ID: {}] {} {}",
+                comment.id.yellow().bold(),
+                author.bold().blue(),
+                created.dimmed()
+            );
+            if let Some(ref body) = comment.body {
+                println!("\n{}", crate::adf::adf_to_terminal(body, true));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_comment_edit(
+    args: IssueCommentEditArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let comment_id = args.comment_id.trim();
+
+    let adf_val = if let Some(ref adf_path) = args.adf {
+        let raw = read_file_or_stdin(adf_path)?;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+            JiraError::Generic(format!("Invalid raw ADF JSON in '{}': {}", adf_path, e))
+        })?;
+        parsed
+    } else if let Some(ref body_path) = args.body_file {
+        let raw = read_file_or_stdin(body_path)?;
+        let doc = text_to_adf(&raw);
+        serde_json::to_value(&doc)?
+    } else if let Some(ref msg) = args.message {
+        let doc = text_to_adf(msg);
+        serde_json::to_value(&doc)?
+    } else {
+        return Err(JiraError::Generic(
+            "Comment body must be provided via -f/--body-file, --adf, or -m/--message".to_string(),
+        ));
+    };
+
+    let payload = serde_json::json!({
+        "body": adf_val
+    });
+
+    if args.dry_run {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let updated = client.edit_comment_raw(&key, comment_id, &payload).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!("{}", serde_json::to_string_pretty(&updated)?);
+        }
+        _ => {
+            println!(
+                "{} Updated comment {} on {}",
+                "✔".green().bold(),
+                comment_id.cyan(),
+                key.cyan()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_comment_delete(
+    args: IssueCommentDeleteArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let key = args.key.trim().to_uppercase();
+    let comment_id = args.comment_id.trim();
+
+    if !args.yes {
+        let confirmed = inquire::Confirm::new(&format!(
+            "Permanently delete comment {} on {}?",
+            comment_id, key
+        ))
+        .with_default(false)
+        .prompt()
+        .map_err(|e| JiraError::Prompt(e.to_string()))?;
+
+        if !confirmed {
+            println!("Comment deletion cancelled.");
+            return Ok(());
+        }
+    }
+
+    client.delete_comment(&key, comment_id).await?;
+
+    match output_mode {
+        OutputMode::Json => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "deleted": true,
+                    "key": key,
+                    "comment_id": comment_id
+                })
+            );
+        }
+        _ => {
+            println!(
+                "{} Deleted comment {} on {}",
+                "✔".green().bold(),
+                comment_id.cyan(),
+                key.cyan()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_create_subtasks(
+    args: IssueCreateSubtasksArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let parent_key = args.parent.trim().to_uppercase();
+
+    // 1. Fetch parent issue to retrieve project and existing subtasks
+    let parent_issue = client
+        .get_issue_with_fields(&parent_key, "project,subtasks")
+        .await?;
+
+    let project_key = parent_issue
+        .fields
+        .project
+        .as_ref()
+        .map(|p| p.key.clone())
+        .ok_or_else(|| {
+            JiraError::Generic(format!(
+                "Could not determine project for parent issue '{}'",
+                parent_key
+            ))
+        })?;
+
+    let mut existing_summaries = HashSet::new();
+    if let Some(subtasks) = parent_issue.fields.subtasks {
+        for s in subtasks {
+            if let Some(f) = s.fields {
+                existing_summaries.insert(f.summary);
+            }
+        }
+    }
+
+    // 2. Resolve subtask issue type
+    let subtask_type = resolve_subtask_type(client, &project_key).await?;
+
+    // 3. Read and parse entries JSON file
+    let file_content = read_file_or_stdin(&args.file)?;
+    let entries: Vec<SubtaskEntry> = serde_json::from_str(&file_content).map_err(|e| {
+        JiraError::Generic(format!(
+            "Failed to parse subtasks JSON from '{}': {}",
+            args.file, e
+        ))
+    })?;
+
+    // 4. Pre-parse custom fields
+    let mut custom_fields = serde_json::Map::new();
+    for f in &args.fields {
+        let (name, val) = parse_custom_field(f)?;
+        custom_fields.insert(name, val);
+    }
+
+    // 5. Create subtasks or report dry-run
+    let mut created_results: Vec<serde_json::Value> = Vec::new();
+    let mut skipped_summaries: Vec<String> = Vec::new();
+
+    for entry in entries {
+        if existing_summaries.contains(&entry.summary) {
+            if output_mode != OutputMode::Json {
+                println!(
+                    "{} Skipped existing subtask: '{}'",
+                    "↷".yellow().bold(),
+                    entry.summary
+                );
+            }
+            skipped_summaries.push(entry.summary);
+            continue;
+        }
+
+        if let Some(limit) = args.limit {
+            if created_results.len() >= limit {
+                break;
+            }
+        }
+
+        let mut fields = custom_fields.clone();
+        fields.insert(
+            "project".to_string(),
+            serde_json::json!({ "key": project_key }),
+        );
+        fields.insert(
+            "parent".to_string(),
+            serde_json::json!({ "key": parent_key }),
+        );
+        fields.insert(
+            "issuetype".to_string(),
+            serde_json::json!({ "name": subtask_type }),
+        );
+        fields.insert("summary".to_string(), serde_json::json!(entry.summary));
+
+        if let Some(ref desc) = entry.description {
+            let doc = text_to_adf(desc);
+            fields.insert("description".to_string(), serde_json::to_value(doc)?);
+        }
+
+        if let Some(ref prio) = entry.priority {
+            fields.insert("priority".to_string(), serde_json::json!({ "name": prio }));
+        }
+
+        if !args.labels.is_empty() {
+            fields.insert("labels".to_string(), serde_json::json!(args.labels));
+        }
+
+        let payload = serde_json::json!({ "fields": fields });
+
+        if args.dry_run {
+            let dry_key = format!("{}-DRY", parent_key);
+            let dry_url = format!("{}/browse/{}", client.instance_url(), dry_key);
+            if output_mode != OutputMode::Json {
+                println!(
+                    "{} [dry-run] Would create subtask '{}' under {}",
+                    "ℹ".blue().bold(),
+                    entry.summary,
+                    parent_key.cyan()
+                );
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            }
+            created_results.push(serde_json::json!({
+                "key": dry_key,
+                "url": dry_url,
+                "summary": entry.summary
+            }));
+        } else {
+            let created = client.create_issue_raw(&payload).await?;
+            let issue_url = format!("{}/browse/{}", client.instance_url(), created.key);
+            if output_mode != OutputMode::Json {
+                println!(
+                    "{} Created {} ({}) - {}",
+                    "✔".green().bold(),
+                    created.key.bold().cyan(),
+                    issue_url.dimmed(),
+                    entry.summary
+                );
+            }
+            created_results.push(serde_json::json!({
+                "key": created.key,
+                "url": issue_url,
+                "summary": entry.summary
+            }));
+            existing_summaries.insert(entry.summary);
+        }
+    }
+
+    if output_mode == OutputMode::Json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "created": created_results,
+                "skipped": skipped_summaries
+            })
+        );
+    }
+
+    Ok(())
+}
+
+async fn handle_set_priority(
+    args: IssueSetPriorityArgs,
+    client: &JiraClient,
+    output_mode: OutputMode,
+) -> Result<()> {
+    let mut updated_keys = Vec::new();
+
+    for key_raw in &args.keys {
+        let key = key_raw.trim().to_uppercase();
+        client
+            .edit_issue(&key, None, None, Some(&args.priority))
+            .await?;
+        updated_keys.push(key);
+    }
+
+    match output_mode {
+        OutputMode::Json => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "priority": args.priority,
+                    "updated": updated_keys
+                })
+            );
+        }
+        _ => {
+            for key in &updated_keys {
+                println!(
+                    "{} Set priority of {} to '{}'",
+                    "✔".green().bold(),
+                    key.cyan(),
+                    args.priority.bold()
+                );
+            }
         }
     }
 
@@ -791,7 +1528,12 @@ async fn handle_attachments(
 async fn handle_link(args: IssueLinkArgs, client: &JiraClient) -> Result<()> {
     let inward = args.inward.trim().to_uppercase();
     let outward = args.outward.trim().to_uppercase();
-    let comment_doc = args.comment.as_deref().map(text_to_adf);
+    let comment_doc = if let Some(ref path) = args.body_file {
+        let raw = read_file_or_stdin(path)?;
+        Some(text_to_adf(&raw))
+    } else {
+        args.comment.as_deref().map(text_to_adf)
+    };
 
     client
         .link_issues(&inward, &outward, &args.link_type, comment_doc.as_ref())
@@ -1026,5 +1768,193 @@ mod tests {
             }
             _ => panic!("unexpected command parsed"),
         }
+
+        let cli = TestCli::try_parse_from(["jira", "comment-get", "DEV-1", "10050"]).unwrap();
+        match cli.command {
+            IssueSubcommand::CommentGet(args) => {
+                assert_eq!(args.key, "DEV-1");
+                assert_eq!(args.comment_id, "10050");
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from([
+            "jira",
+            "comment-edit",
+            "DEV-1",
+            "10050",
+            "-f",
+            "updated.md",
+            "--dry-run",
+        ])
+        .unwrap();
+        match cli.command {
+            IssueSubcommand::CommentEdit(args) => {
+                assert_eq!(args.key, "DEV-1");
+                assert_eq!(args.comment_id, "10050");
+                assert_eq!(args.body_file.as_deref(), Some("updated.md"));
+                assert!(args.dry_run);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from([
+            "jira",
+            "comment-edit",
+            "DEV-1",
+            "10050",
+            "--adf",
+            "raw_adf.json",
+        ])
+        .unwrap();
+        match cli.command {
+            IssueSubcommand::CommentEdit(args) => {
+                assert_eq!(args.adf.as_deref(), Some("raw_adf.json"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli =
+            TestCli::try_parse_from(["jira", "comment-delete", "DEV-1", "10050", "-y"]).unwrap();
+        match cli.command {
+            IssueSubcommand::CommentDelete(args) => {
+                assert_eq!(args.key, "DEV-1");
+                assert_eq!(args.comment_id, "10050");
+                assert!(args.yes);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from([
+            "jira",
+            "create",
+            "-P",
+            "DEV",
+            "-s",
+            "Subtask item",
+            "--parent",
+            "DEV-100",
+            "-l",
+            "core",
+            "-l",
+            "backend",
+            "--field",
+            "customfield_123=simple_string",
+            "--field",
+            "customfield_456={\"key\":\"val\"}",
+            "--dry-run",
+        ])
+        .unwrap();
+        match cli.command {
+            IssueSubcommand::Create(args) => {
+                assert_eq!(args.project.as_deref(), Some("DEV"));
+                assert_eq!(args.summary.as_deref(), Some("Subtask item"));
+                assert_eq!(args.parent.as_deref(), Some("DEV-100"));
+                assert_eq!(args.labels, vec!["core", "backend"]);
+                assert_eq!(
+                    args.fields,
+                    vec![
+                        "customfield_123=simple_string",
+                        "customfield_456={\"key\":\"val\"}"
+                    ]
+                );
+                assert!(args.dry_run);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from([
+            "jira",
+            "edit",
+            "DEV-101",
+            "-f",
+            "body.md",
+            "--add-label",
+            "new-tag",
+            "--remove-label",
+            "old-tag",
+            "--field",
+            "priority=High",
+            "--dry-run",
+        ])
+        .unwrap();
+        match cli.command {
+            IssueSubcommand::Edit(args) => {
+                assert_eq!(args.key, "DEV-101");
+                assert_eq!(args.body_file.as_deref(), Some("body.md"));
+                assert_eq!(args.add_labels, vec!["new-tag"]);
+                assert_eq!(args.remove_labels, vec!["old-tag"]);
+                assert_eq!(args.fields, vec!["priority=High"]);
+                assert!(args.dry_run);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from([
+            "jira",
+            "create-subtasks",
+            "DEV-100",
+            "tasks.json",
+            "--limit",
+            "5",
+            "-l",
+            "batch",
+            "--field",
+            "custom=123",
+            "--dry-run",
+        ])
+        .unwrap();
+        match cli.command {
+            IssueSubcommand::CreateSubtasks(args) => {
+                assert_eq!(args.parent, "DEV-100");
+                assert_eq!(args.file, "tasks.json");
+                assert_eq!(args.limit, Some(5));
+                assert_eq!(args.labels, vec!["batch"]);
+                assert_eq!(args.fields, vec!["custom=123"]);
+                assert!(args.dry_run);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+
+        let cli = TestCli::try_parse_from([
+            "jira",
+            "set-priority",
+            "High",
+            "DEV-101",
+            "DEV-102",
+            "DEV-103",
+        ])
+        .unwrap();
+        match cli.command {
+            IssueSubcommand::SetPriority(args) => {
+                assert_eq!(args.priority, "High");
+                assert_eq!(args.keys, vec!["DEV-101", "DEV-102", "DEV-103"]);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn test_parse_custom_field() {
+        let (name, val) = parse_custom_field("customfield_16375=N/A").unwrap();
+        assert_eq!(name, "customfield_16375");
+        assert_eq!(val, serde_json::Value::String("N/A".to_string()));
+
+        let (name, val) =
+            parse_custom_field("components=[{\"name\":\"Backend\"},{\"name\":\"API\"}]").unwrap();
+        assert_eq!(name, "components");
+        assert!(val.is_array());
+        assert_eq!(val[0]["name"], "Backend");
+
+        let (name, val) = parse_custom_field("customfield_number=42").unwrap();
+        assert_eq!(name, "customfield_number");
+        assert_eq!(val, serde_json::json!(42));
+
+        let (name, val) = parse_custom_field("customfield_bool=true").unwrap();
+        assert_eq!(name, "customfield_bool");
+        assert_eq!(val, serde_json::json!(true));
+
+        assert!(parse_custom_field("invalid_no_equals").is_err());
+        assert!(parse_custom_field("=val_no_name").is_err());
     }
 }
