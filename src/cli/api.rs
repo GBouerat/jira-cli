@@ -35,22 +35,29 @@ pub fn read_file_or_stdin(path_or_dash: &str) -> Result<String> {
     }
 }
 
+/// Normalizes an API path relative to `/rest/api/3` unless it specifies `/rest/` or full URL.
+pub fn normalize_api_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.starts_with("/rest/")
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+    {
+        trimmed.to_string()
+    } else if trimmed.starts_with("rest/") {
+        format!("/{}", trimmed)
+    } else if trimmed.starts_with('/') {
+        format!("/rest/api/3{}", trimmed)
+    } else {
+        format!("/rest/api/3/{}", trimmed)
+    }
+}
+
 /// Dispatches raw API requests.
 pub async fn handle_api_command(args: ApiArgs, client: &JiraClient) -> Result<()> {
     let method = Method::from_bytes(args.method.trim().to_uppercase().as_bytes())
         .map_err(|e| JiraError::Generic(format!("Invalid HTTP method '{}': {}", args.method, e)))?;
 
-    let trimmed_path = args.path.trim();
-    let normalized_path = if trimmed_path.starts_with("/rest/")
-        || trimmed_path.starts_with("http://")
-        || trimmed_path.starts_with("https://")
-    {
-        trimmed_path.to_string()
-    } else if trimmed_path.starts_with('/') {
-        format!("/rest/api/3{}", trimmed_path)
-    } else {
-        format!("/rest/api/3/{}", trimmed_path)
-    };
+    let normalized_path = normalize_api_path(&args.path);
 
     let body_json = if let Some(ref file_path) = args.body_file {
         let content = read_file_or_stdin(file_path)?;
@@ -77,4 +84,34 @@ pub async fn handle_api_command(args: ApiArgs, client: &JiraClient) -> Result<()
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_api_path() {
+        assert_eq!(normalize_api_path("issue/DEV-1"), "/rest/api/3/issue/DEV-1");
+        assert_eq!(
+            normalize_api_path("/issue/DEV-1"),
+            "/rest/api/3/issue/DEV-1"
+        );
+        assert_eq!(
+            normalize_api_path("/rest/agile/1.0/board"),
+            "/rest/agile/1.0/board"
+        );
+        assert_eq!(
+            normalize_api_path("rest/agile/1.0/board"),
+            "/rest/agile/1.0/board"
+        );
+        assert_eq!(
+            normalize_api_path("rest/api/3/issue/DEV-1"),
+            "/rest/api/3/issue/DEV-1"
+        );
+        assert_eq!(
+            normalize_api_path("https://example.atlassian.net/rest/api/3/issue/DEV-1"),
+            "https://example.atlassian.net/rest/api/3/issue/DEV-1"
+        );
+    }
 }

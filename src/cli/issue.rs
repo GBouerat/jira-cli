@@ -863,12 +863,19 @@ async fn handle_edit(
     }
 
     if fields.is_empty() && update.is_empty() {
-        println!(
-            "{} No update fields specified for {}. Provide at least one of -s/--summary, -d/--description, -f/--body-file, --priority, --label, --add-label, --remove-label, or --field.",
-            "⚠".yellow().bold(),
-            key.cyan()
-        );
-        return Ok(());
+        if output_mode == OutputMode::Json {
+            return Err(JiraError::Generic(format!(
+                "No update fields specified for {}. Provide at least one of -s/--summary, -d/--description, -f/--body-file, --priority, --label, --add-label, --remove-label, or --field.",
+                key
+            )));
+        } else {
+            eprintln!(
+                "{} No update fields specified for {}. Provide at least one of -s/--summary, -d/--description, -f/--body-file, --priority, --label, --add-label, --remove-label, or --field.",
+                "⚠".yellow().bold(),
+                key.cyan()
+            );
+            return Ok(());
+        }
     }
 
     let mut payload_map = serde_json::Map::new();
@@ -1045,6 +1052,11 @@ async fn handle_comment(
             }
         }
         Some(msg) => {
+            if msg.trim().is_empty() {
+                return Err(JiraError::Generic(
+                    "Comment message cannot be empty.".to_string(),
+                ));
+            }
             let adf_body = text_to_adf(&msg);
             let created_comment = client.add_comment(&key, &adf_body).await?;
             match output_mode {
@@ -1120,9 +1132,19 @@ async fn handle_comment_edit(
         parsed
     } else if let Some(ref body_path) = args.body_file {
         let raw = read_file_or_stdin(body_path)?;
+        if raw.trim().is_empty() {
+            return Err(JiraError::Generic(
+                "Comment body cannot be empty.".to_string(),
+            ));
+        }
         let doc = text_to_adf(&raw);
         serde_json::to_value(&doc)?
     } else if let Some(ref msg) = args.message {
+        if msg.trim().is_empty() {
+            return Err(JiraError::Generic(
+                "Comment message cannot be empty.".to_string(),
+            ));
+        }
         let doc = text_to_adf(msg);
         serde_json::to_value(&doc)?
     } else {
@@ -1236,7 +1258,7 @@ async fn handle_create_subtasks(
     if let Some(subtasks) = parent_issue.fields.subtasks {
         for s in subtasks {
             if let Some(f) = s.fields {
-                existing_summaries.insert(f.summary);
+                existing_summaries.insert(f.summary.trim().to_string());
             }
         }
     }
@@ -1265,7 +1287,8 @@ async fn handle_create_subtasks(
     let mut skipped_summaries: Vec<String> = Vec::new();
 
     for entry in entries {
-        if existing_summaries.contains(&entry.summary) {
+        let trimmed_summary = entry.summary.trim();
+        if existing_summaries.contains(trimmed_summary) {
             if output_mode != OutputMode::Json {
                 println!(
                     "{} Skipped existing subtask: '{}'",
@@ -1347,7 +1370,7 @@ async fn handle_create_subtasks(
                 "url": issue_url,
                 "summary": entry.summary
             }));
-            existing_summaries.insert(entry.summary);
+            existing_summaries.insert(trimmed_summary.to_string());
         }
     }
 

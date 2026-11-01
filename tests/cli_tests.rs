@@ -58,3 +58,58 @@ fn test_cli_missing_credentials_fails_gracefully() {
         .failure()
         .stderr(predicate::str::contains("Authentication error"));
 }
+
+#[test]
+fn test_cli_subcommands_help_metadata() {
+    // 1. comment-get help
+    let mut cmd = Command::cargo_bin("jira").unwrap();
+    cmd.args(["issue", "comment-get", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("comment-get"))
+        .stdout(predicate::str::contains("<KEY>"))
+        .stdout(predicate::str::contains("<COMMENT_ID>"));
+
+    // 2. comment-edit help
+    let mut cmd = Command::cargo_bin("jira").unwrap();
+    cmd.args(["issue", "comment-edit", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("--adf"))
+        .stdout(predicate::str::contains("--body-file"))
+        .stdout(predicate::str::contains("--dry-run"));
+
+    // 3. comment-delete help
+    let mut cmd = Command::cargo_bin("jira").unwrap();
+    cmd.args(["issue", "comment-delete", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("-y"))
+        .stdout(predicate::str::contains("<COMMENT_ID>"));
+
+    // 4. create-subtasks help
+    let mut cmd = Command::cargo_bin("jira").unwrap();
+    cmd.args(["issue", "create-subtasks", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("<PARENT>"))
+        .stdout(predicate::str::contains("<FILE>"))
+        .stdout(predicate::str::contains("--limit"));
+
+    // 5. set-priority help
+    let mut cmd = Command::cargo_bin("jira").unwrap();
+    cmd.args(["issue", "set-priority", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("<PRIORITY>"))
+        .stdout(predicate::str::contains("<KEYS>..."));
+
+    // 6. api help
+    let mut cmd = Command::cargo_bin("jira").unwrap();
+    cmd.args(["api", "--help"]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("<METHOD>"))
+        .stdout(predicate::str::contains("<PATH>"))
+        .stdout(predicate::str::contains("--body-file"));
+}

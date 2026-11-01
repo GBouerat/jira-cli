@@ -1129,6 +1129,14 @@ async fn test_mock_raw_api_call() {
     };
     handle_api_command(args2, &client).await.unwrap();
 
+    // Test rest/ without leading slash GET (JIR-13)
+    let args2_b = ApiArgs {
+        method: "GET".to_string(),
+        path: "rest/agile/1.0/board".to_string(),
+        body_file: None,
+    };
+    handle_api_command(args2_b, &client).await.unwrap();
+
     // Test POST with file
     let temp_file = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(temp_file.path(), serde_json::to_string(&post_body).unwrap()).unwrap();
@@ -1156,4 +1164,139 @@ async fn test_mock_raw_api_call() {
         }
         other => panic!("expected JiraError::Api, got: {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn test_mock_issue_edit_empty_fields_in_json_fails() {
+    let mock_server = MockServer::start().await;
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+
+    let args = IssueArgs {
+        command: IssueSubcommand::Edit(IssueEditArgs {
+            key: "DEV-10".to_string(),
+            summary: None,
+            description: None,
+            body_file: None,
+            priority: None,
+            labels: vec![],
+            add_labels: vec![],
+            remove_labels: vec![],
+            fields: vec![],
+            dry_run: false,
+        }),
+    };
+
+    // JIR-14: In OutputMode::Json, empty edit must return Err rather than printing text to stdout
+    let err = handle_issue_command(args, &client, OutputMode::Json, None)
+        .await
+        .unwrap_err();
+    match err {
+        JiraError::Generic(msg) => {
+            assert!(msg.contains("No update fields specified"));
+        }
+        other => panic!("expected JiraError::Generic, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_mock_comment_empty_message_fails() {
+    let mock_server = MockServer::start().await;
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+
+    // JIR-16: Empty comment message must return error without making HTTP requests
+    let args = IssueArgs {
+        command: IssueSubcommand::Comment(jira_cli::cli::issue::IssueCommentArgs {
+            key: "DEV-10".to_string(),
+            message: Some("   ".to_string()),
+            body_file: None,
+        }),
+    };
+
+    let err = handle_issue_command(args, &client, OutputMode::Json, None)
+        .await
+        .unwrap_err();
+    match err {
+        JiraError::Generic(msg) => {
+            assert!(msg.contains("Comment message cannot be empty"));
+        }
+        other => panic!("expected JiraError::Generic, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_mock_subtasks_whitespace_deduplication() {
+    let mock_server = MockServer::start().await;
+
+    // Parent issue has subtask with trailing spaces
+    let parent_json = serde_json::json!({
+        "id": "7000",
+        "key": "DEV-70",
+        "fields": {
+            "summary": "Parent Issue",
+            "project": { "id": "100", "key": "DEV", "name": "Development" },
+            "subtasks": [
+                {
+                    "id": "7001",
+                    "key": "DEV-71",
+                    "fields": {
+                        "summary": "  Subtask With Spaces  "
+                    }
+                }
+            ]
+        }
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/DEV-70"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(parent_json))
+        .mount(&mock_server)
+        .await;
+
+    let createmeta_json = serde_json::json!({
+        "values": [
+            { "id": "5", "name": "Sub-task", "subtask": true }
+        ]
+    });
+
+    Mock::given(method("GET"))
+        .and(path("/rest/api/3/issue/createmeta/DEV/issuetypes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(createmeta_json))
+        .mount(&mock_server)
+        .await;
+
+    // JSON file contains the same summary without spaces (should be skipped by JIR-15)
+    let batch_json = serde_json::json!([
+        {
+            "summary": "Subtask With Spaces",
+            "description": "Should be deduplicated and skipped"
+        }
+    ]);
+
+    let temp_file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        temp_file.path(),
+        serde_json::to_string(&batch_json).unwrap(),
+    )
+    .unwrap();
+
+    let client =
+        JiraClient::from_credentials(&mock_server.uri(), "test@test.com", "token").unwrap();
+
+    let args = IssueArgs {
+        command: IssueSubcommand::CreateSubtasks(IssueCreateSubtasksArgs {
+            parent: "DEV-70".to_string(),
+            file: temp_file.path().to_str().unwrap().to_string(),
+            limit: None,
+            labels: vec![],
+            fields: vec![],
+            dry_run: false,
+        }),
+    };
+
+    // No POST to /rest/api/3/issue should occur because it's skipped
+    handle_issue_command(args, &client, OutputMode::Json, None)
+        .await
+        .unwrap();
 }
